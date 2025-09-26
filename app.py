@@ -4,11 +4,12 @@ from rapidfuzz import process, fuzz
 import unidecode
 import re
 import os
+import xml.etree.ElementTree as ET
 
 # --- Configuração da página ---
-st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide")
-st.title("📦 Dashboard NCM & IPI")
-st.markdown("Consulta de NCM/IPI e cálculo de preço final com IPI. By **NextSolutions - Nivaldo Freitas**")
+st.set_page_config(page_title="Dashboard NCM & IPI + Google Shopping", layout="wide")
+st.title("📦 Dashboard NCM & IPI + Google Shopping")
+st.markdown("Consulta de NCM/IPI e cálculo de preço final com IPI. Busca automática de SKU no XML GoogleShopping_full.xml.")
 
 # ==========================
 # --- Funções utilitárias ---
@@ -80,60 +81,74 @@ def carregar_tipi(caminho="tipi.xlsx"):
         return pd.DataFrame(columns=["codigo", "IPI"])
 
 # ==========================
+# --- Funções XML Google Shopping ---
+# ==========================
+def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
+    if not os.path.exists(caminho_xml):
+        return None, "Arquivo XML não encontrado."
+    
+    tree = ET.parse(caminho_xml)
+    root = tree.getroot()
+    
+    # Namespace padrão do Google Shopping
+    ns = {'g': 'http://base.google.com/ns/1.0'}
+    
+    for item in root.findall('item'):
+        g_id = item.find('g:id', ns)
+        if g_id is not None and g_id.text.strip() == str(sku):
+            titulo = item.find('title', ns).text if item.find('title', ns) is not None else ""
+            link = item.find('link', ns).text if item.find('link', ns) is not None else ""
+            preco_prazo = item.find('g:price', ns).text if item.find('g:price', ns) is not None else ""
+            preco_vista = item.find('g:sale_price', ns).text if item.find('g:sale_price', ns) is not None else ""
+            descricao = item.find('description', ns).text if item.find('description', ns) is not None else ""
+            
+            # Conversão para float
+            preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
+            preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
+            
+            return {
+                "SKU": sku,
+                "Título": titulo,
+                "Link": link,
+                "Valor à Prazo": preco_prazo_val,
+                "Valor à Vista": preco_vista_val,
+                "Descrição": descricao
+            }, None
+    return None, "SKU não encontrado no XML."
+
+# ==========================
 # --- Funções da Calculadora de IPI ---
 # ==========================
-def calcular_preco_final(df, sku, valor_final_desejado, frete=0):
-    item = df[df['SKU'] == str(sku)]
-    if item.empty:
-        return None, "SKU não encontrado."
-
-    descricao = item['Descrição Item'].values[0]
-    ipi_percentual = item['IPI %'].values[0] / 100
-
+def calcular_preco_final_xml(item_info, ipi_percentual, valor_final_desejado, frete=0):
+    ipi_percentual = ipi_percentual / 100 if ipi_percentual != "NT" else 0
     base_calculo = valor_final_desejado / (1 + ipi_percentual)
     valor_total = base_calculo + frete
     ipi_valor = valor_total * ipi_percentual
     valor_final = valor_total + ipi_valor
-
+    
     return {
-        "SKU": sku,
-        "Descrição": descricao,
+        "SKU": item_info["SKU"],
+        "Título": item_info["Título"],
         "Valor Base (Sem IPI)": round(base_calculo, 2),
         "Frete": round(frete, 2),
         "IPI": round(ipi_valor, 2),
-        "Valor Final (Com IPI e Frete)": round(valor_final, 2)
-    }, None
+        "Valor Final (Com IPI e Frete)": round(valor_final, 2),
+        "Link": item_info["Link"],
+        "Descrição": item_info["Descrição"]
+    }
 
 # ==========================
-# --- Carregar bases ---
+# --- Carregar bases NCM/IPI ---
 # ==========================
-# NCM/IPI
 df_ncm = carregar_ncm()
 df_tipi = carregar_tipi()
 df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
 df_full["IPI"] = df_full["IPI"].fillna("NT")
 
-# IPI Itens
-st.sidebar.header("📂 Upload de planilhas (opcional)")
-ipi_upload = st.sidebar.file_uploader("Planilha IPI Itens", type=["xlsx"])
-if ipi_upload:
-    df_ipi = pd.read_excel(ipi_upload, engine="openpyxl")
-else:
-    file_default = "IPI Itens.xlsx"
-    if os.path.exists(file_default):
-        df_ipi = pd.read_excel(file_default, engine="openpyxl")
-    else:
-        df_ipi = pd.DataFrame(columns=["SKU","Descrição Item","Valor à Prazo","Valor à Vista","IPI %"])
-
-df_ipi["SKU"] = df_ipi["SKU"].astype(str)
-df_ipi["Valor à Prazo"] = df_ipi["Valor à Prazo"].astype(str).str.replace(",", ".").astype(float)
-df_ipi["Valor à Vista"] = df_ipi["Valor à Vista"].astype(str).str.replace(",", ".").astype(float)
-df_ipi["IPI %"] = df_ipi["IPI %"].astype(str).str.replace(",", ".").astype(float)
-
 # ==========================
-# --- Interface principal ---
+# --- Interface ---
 # ==========================
-tab1, tab2 = st.tabs(["Consulta NCM/IPI", "Calculadora de IPI"])
+tab1, tab2 = st.tabs(["Consulta NCM/IPI", "Calculadora de IPI XML"])
 
 with tab1:
     st.header("🔍 Consulta de NCM/IPI")
@@ -161,25 +176,30 @@ with tab1:
                 st.warning("⚠️ Nenhum resultado encontrado.")
 
 with tab2:
-    st.header("🧾 Calculadora de IPI")
+    st.header("🧾 Calculadora de IPI via XML")
     sku_input = st.text_input("Digite o SKU do produto:")
     valor_final_input = st.text_input("Digite o valor final desejado (com IPI):")
     frete_checkbox = st.checkbox("O item possui frete?")
     frete_input = st.text_input("Valor do frete:", value="0.00") if frete_checkbox else "0.00"
 
-    if st.button("Calcular Preço"):
+    if st.button("Calcular Preço XML"):
         if not sku_input or not valor_final_input:
             st.warning("Preencha o SKU e o valor final desejado.")
         else:
             try:
                 valor_final_desejado = float(valor_final_input.replace(",", "."))
                 frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
-                resultado, erro = calcular_preco_final(df_ipi, sku_input, valor_final_desejado, frete_valor)
 
+                # Buscar SKU no XML
+                item_info, erro = buscar_sku_xml(sku_input)
                 if erro:
                     st.error(erro)
                 else:
+                    # Buscar IPI no NCM/IPI
+                    ipi_val = df_full[df_full['codigo'] == padronizar_codigo(sku_input)]
+                    ipi_percentual = float(ipi_val['IPI'].values[0]) if not ipi_val.empty and ipi_val['IPI'].values[0] != "NT" else 0
+                    
+                    resultado = calcular_preco_final_xml(item_info, ipi_percentual, valor_final_desejado, frete_valor)
                     st.success("✅ Cálculo realizado com sucesso!")
                     st.table(pd.DataFrame([resultado]))
-            except ValueError:
-                st.error("Valores inválidos. Use apenas números para valor e frete.")
+
