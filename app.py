@@ -6,35 +6,37 @@ import re
 import os
 import xml.etree.ElementTree as ET
 
-# --- Configuração da página ---
+# ==========================
+# Configuração da página
+# ==========================
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
 
-# --- Cores Vetaia Cloud ---
+# ==========================
+# Paleta de cores Vetaia Cloud
+# ==========================
+PRIMARY_COLOR = "#00A9E0"
+SECONDARY_COLOR = "#0077B6"
 BACKGROUND_COLOR = "#1A1A1A"
-TEXT_COLOR = "#FFFFFF"
-BUTTON_COLOR = "#00A9E0"
-BUTTON_HOVER = "#0077B6"
 CARD_COLOR = "#2A2A2A"
-CARD_TEXT_COLOR = "#FFFFFF"
+TEXT_COLOR = "#FFFFFF"
+BUTTON_TEXT = "#FFFFFF"
 
-# --- Estilos ---
+# ==========================
+# Estilos personalizados
+# ==========================
 st.markdown(f"""
 <style>
 body {{background-color:{BACKGROUND_COLOR}; color:{TEXT_COLOR};}}
 .stButton>button {{
-    background-color:{BUTTON_COLOR}; color:{TEXT_COLOR};
-    font-weight:bold; border-radius:10px; padding:12px 25px;
+    background-color:{PRIMARY_COLOR}; color:{BUTTON_TEXT};
+    font-weight:bold; border-radius:12px; padding:12px 25px; font-size:16px;
 }}
-.stButton>button:hover {{background-color:{BUTTON_HOVER}; color:{TEXT_COLOR};}}
+.stButton>button:hover {{background-color:{SECONDARY_COLOR}; color:{BUTTON_TEXT};}}
 .stTextInput>div>input, .stNumberInput>div>input {{
-    border-radius:10px; padding:10px;
-    background-color:#333333; color:{TEXT_COLOR};
+    border-radius:12px; padding:12px; background-color:#333; color:{TEXT_COLOR};
 }}
 .stRadio>div>div {{flex-direction:row;}}
-.stTable {{
-    border-radius:10px; overflow:hidden; color:{TEXT_COLOR};
-    background-color:{CARD_COLOR};
-}}
+.stTable {{border-radius:12px; overflow:hidden; color:{TEXT_COLOR}; background-color:{CARD_COLOR};}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -156,32 +158,86 @@ def buscar_por_descricao(df, termo, limite=10):
         codigo = df.loc[idx, "codigo"]
         ipi_val = df_tipi[df_tipi["codigo"] == codigo]["IPI"].values
         ipi_val = ipi_val[0] if len(ipi_val) > 0 else "NT"
-        resultados.append({"codigo": codigo, "descricao": df.loc[idx, "descricao"],
-                           "IPI": ipi_val, "similaridade": round(score,2)})
+        resultados.append({"codigo": codigo, "descricao": df.loc[idx, "descricao"], "IPI": ipi_val, "similaridade": round(score,2)})
     return resultados
 
 # ==========================
-# Interface passo a passo
+# Interface Streamlit com cards
 # ==========================
-if "etapa" not in st.session_state: st.session_state.etapa = "inicio"
-etapa = st.session_state.etapa
+tab1, tab2, tab3 = st.tabs(["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦"])
 
-def botao_voltar():
-    if st.button("⬅ Voltar"):
-        st.session_state.etapa = "inicio"
-        st.experimental_rerun()
+# --- Aba 1 ---
+with tab1:
+    st.subheader("Consulta de SKU no XML")
+    sku_input = st.text_input("Digite o SKU do produto:")
+    if sku_input:
+        item_info, erro = buscar_sku_xml(sku_input)
+        if erro: st.error(erro)
+        else:
+            st.markdown(f"""
+            <div style='background-color:{CARD_COLOR}; padding:20px; border-radius:15px; color:{TEXT_COLOR};'>
+            <h3>{item_info['Título']}</h3>
+            <p>{item_info['Descrição']}</p>
+            <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
+            <p><b>Valor à Prazo:</b> R$ {item_info['Valor à Prazo']}</p>
+            <p><b>Valor à Vista:</b> R$ {item_info['Valor à Vista']}</p>
+            <p><b>NCM:</b> {item_info['NCM']}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-# --- Etapa Inicio ---
-if etapa == "inicio":
-    st.markdown(f"<div style='padding:20px; background-color:{CARD_COLOR}; border-radius:10px'>"
-                "<h3>Escolha uma funcionalidade:</h3></div>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Consulta de SKU 🔍"): st.session_state.etapa = "sku"; st.experimental_rerun()
-    with col2:
-        if st.button("Cálculo do IPI 💰"): st.session_state.etapa = "ipi"; st.experimental_rerun()
-    with col3:
-        if st.button("Consulta NCM/IPI 📦"): st.session_state.etapa = "ncm"; st.experimental_rerun()
+# --- Aba 2 ---
+with tab2:
+    st.subheader("Cálculo do IPI")
+    sku_calc = st.text_input("Digite o SKU para calcular o IPI:", key="calc_sku")
+    if sku_calc:
+        item_info, erro = buscar_sku_xml(sku_calc)
+        if erro: st.error(erro)
+        else:
+            opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo", "À Vista"])
+            valor_produto = item_info["Valor à Prazo"] if opcao_valor=="À Prazo" else item_info["Valor à Vista"]
+            valor_final_input = st.text_input("Digite o valor final desejado (com IPI):", value=str(valor_produto))
+            frete_checkbox = st.checkbox("O item possui frete?")
+            frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
 
-# --- Etapas SKU / IPI / NCM ---
-# (mesmo código do exemplo anterior, já corrigido)
+            if st.button("Calcular IPI", key="btn_calc"):
+                try:
+                    valor_final = float(valor_final_input.replace(",", "."))
+                    descricao, resultado, erro_calc = calcular_preco_final(sku_calc, valor_final, frete_valor)
+                    if erro_calc: st.error(erro_calc)
+                    else:
+                        st.markdown(f"""
+                        <div style='background-color:{CARD_COLOR}; padding:20px; border-radius:15px; color:{TEXT_COLOR};'>
+                        <h3>Resultado do Cálculo</h3>
+                        <p><b>SKU:</b> {sku_calc}</p>
+                        <p><b>Valor Selecionado:</b> R$ {valor_produto}</p>
+                        <p><b>Valor Base (Sem IPI):</b> R$ {resultado['valor_base']}</p>
+                        <p><b>Frete:</b> R$ {resultado['frete']}</p>
+                        <p><b>IPI:</b> R$ {resultado['ipi']}</p>
+                        <p><b>Valor Final (Com IPI e Frete):</b> R$ {resultado['valor_final']}</p>
+                        <p><b>Descrição:</b> {descricao}</p>
+                        <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                except ValueError:
+                    st.error("Valores inválidos. Use apenas números para valor final e frete.")
+
+# --- Aba 3 ---
+with tab3:
+    st.subheader("Consulta NCM/IPI")
+    opcao_busca = st.radio("Tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
+    if opcao_busca == "Por código":
+        codigo_input = st.text_input("Digite o código NCM:", key="ncm_codigo")
+        if codigo_input:
+            resultado = buscar_por_codigo(df_ncm, codigo_input)
+            if "erro" in resultado: st.warning(resultado["erro"])
+            else:
+                st.table(pd.DataFrame([resultado]))
+    else:
+        termo_input = st.text_input("Digite parte da descrição:", key="ncm_desc")
+        if termo_input:
+            resultados = buscar_por_descricao(df_ncm, termo_input)
+            if resultados:
+                df_result = pd.DataFrame(resultados).sort_values(by="similaridade", ascending=False)
+                st.table(df_result)
+            else:
+                st.warning("Nenhum resultado encontrado.")
