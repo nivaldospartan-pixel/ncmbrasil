@@ -143,7 +143,11 @@ else:
 
 ipi_upload = st.sidebar.file_uploader("Arquivo Excel com SKU e IPI %", type=["xlsx"])
 if ipi_upload:
-    df_ipi = pd.read_excel(ipi_upload)
+    df_ipi = pd.read_excel(ipi_upload, engine="openpyxl")
+    # Limpeza de dados
+    df_ipi.columns = [c.strip() for c in df_ipi.columns]
+    df_ipi["SKU"] = df_ipi["SKU"].astype(str).str.strip()
+    df_ipi["IPI %"] = df_ipi["IPI %"].astype(str).str.replace(",", ".").astype(float)
 else:
     df_ipi = pd.DataFrame(columns=["SKU","IPI %"])
 df_ipi["SKU"] = df_ipi["SKU"].astype(str)
@@ -189,14 +193,19 @@ with tab2:
         if not sku_input:
             st.warning("Informe o SKU do produto.")
         else:
-            item = df_feed[df_feed["SKU"] == sku_input]
+            sku_input_clean = sku_input.strip()
+            item = df_feed[df_feed["SKU"] == sku_input_clean]
             if item.empty:
                 st.error("SKU não encontrado no feed.")
             else:
                 valor_base = item["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item["Valor à Prazo"].values[0]
                 frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
-                ipi_item = df_ipi[df_ipi["SKU"] == sku_input]
-                ipi_percentual = float(ipi_item["IPI %"].values[0]) if not ipi_item.empty else 0
+                ipi_item = df_ipi[df_ipi["SKU"] == sku_input_clean]
+                if not ipi_item.empty:
+                    ipi_percentual = float(ipi_item["IPI %"].values[0])
+                else:
+                    st.warning(f"⚠️ SKU {sku_input} não encontrado na planilha IPI. Usando IPI = 0%")
+                    ipi_percentual = 0
                 base, ipi_valor, valor_final = calcular_preco(valor_base, ipi_percentual, frete_valor)
                 st.success(f"✅ Cálculo realizado para SKU {sku_input}")
                 st.table({
