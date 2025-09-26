@@ -7,8 +7,8 @@ import os
 import xml.etree.ElementTree as ET
 
 # --- Configuração da página ---
-st.set_page_config(page_title="Dashboard NCM & IPI + Google Shopping", layout="wide")
-st.title("📦 Dashboard NCM & IPI + Google Shopping")
+st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide")
+st.title("📦 Dashboard NCM & IPI")
 st.markdown("Consulta de NCM/IPI e cálculo de preço final com IPI. Busca automática de SKU no XML GoogleShopping_full.xml.")
 
 # ==========================
@@ -118,8 +118,12 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
 # ==========================
 # --- Funções da Calculadora de IPI ---
 # ==========================
-def calcular_preco_final_xml(item_info, ipi_percentual, valor_final_desejado, frete=0):
-    ipi_percentual = ipi_percentual / 100 if ipi_percentual != "NT" else 0
+def calcular_preco_final_xml(item_info, opcao_valor, valor_final_desejado, frete=0):
+    # Seleciona apenas o valor desejado: "Valor à Prazo" ou "Valor à Vista"
+    valor_produto = item_info["Valor à Prazo"] if opcao_valor == "Prazo" else item_info["Valor à Vista"]
+    
+    # Calculo simples de base e IPI para manter compatibilidade
+    ipi_percentual = 0  # Ajuste caso queira buscar IPI do NCM/IPI
     base_calculo = valor_final_desejado / (1 + ipi_percentual)
     valor_total = base_calculo + frete
     ipi_valor = valor_total * ipi_percentual
@@ -128,10 +132,9 @@ def calcular_preco_final_xml(item_info, ipi_percentual, valor_final_desejado, fr
     return {
         "SKU": item_info["SKU"],
         "Título": item_info["Título"],
-        "Valor Base (Sem IPI)": round(base_calculo, 2),
+        "Valor Selecionado": valor_produto,
         "Frete": round(frete, 2),
-        "IPI": round(ipi_valor, 2),
-        "Valor Final (Com IPI e Frete)": round(valor_final, 2),
+        "Valor Final (Com Frete)": round(valor_final, 2),
         "Link": item_info["Link"],
         "Descrição": item_info["Descrição"]
     }
@@ -145,7 +148,7 @@ df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
 df_full["IPI"] = df_full["IPI"].fillna("NT")
 
 # ==========================
-# --- Interface ---
+# --- Interface principal ---
 # ==========================
 tab1, tab2 = st.tabs(["Consulta NCM/IPI", "Calculadora de IPI XML"])
 
@@ -177,7 +180,8 @@ with tab1:
 with tab2:
     st.header("🧾 Calculadora de IPI via XML")
     sku_input = st.text_input("Digite o SKU do produto:")
-    valor_final_input = st.text_input("Digite o valor final desejado (com IPI):")
+    opcao_valor = st.radio("Escolha o valor do produto:", ["Prazo", "Vista"], horizontal=True)
+    valor_final_input = st.text_input("Digite o valor final desejado:")
     frete_checkbox = st.checkbox("O item possui frete?")
     frete_input = st.text_input("Valor do frete:", value="0.00") if frete_checkbox else "0.00"
 
@@ -194,11 +198,7 @@ with tab2:
                 if erro:
                     st.error(erro)
                 else:
-                    # Buscar IPI no NCM/IPI
-                    ipi_val = df_full[df_full['codigo'] == padronizar_codigo(sku_input)]
-                    ipi_percentual = float(ipi_val['IPI'].values[0]) if not ipi_val.empty and ipi_val['IPI'].values[0] != "NT" else 0
-
-                    resultado = calcular_preco_final_xml(item_info, ipi_percentual, valor_final_desejado, frete_valor)
+                    resultado = calcular_preco_final_xml(item_info, opcao_valor, valor_final_desejado, frete_valor)
                     st.success("✅ Cálculo realizado com sucesso!")
                     st.table(pd.DataFrame([resultado]))
             except ValueError:
