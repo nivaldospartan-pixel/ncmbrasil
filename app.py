@@ -39,6 +39,7 @@ tipi_file = st.sidebar.file_uploader("TIPI.xlsx", type=["xlsx"])
 ipi_file = st.sidebar.file_uploader("IPI Itens.xlsx", type=["xlsx"])
 ncm_file = st.sidebar.file_uploader("NCM.csv", type=["csv"])
 
+# --- Funções de carregamento ---
 def carregar_feed_xml(xml_file):
     tree = ET.parse(xml_file)
     root = tree.getroot()
@@ -52,7 +53,7 @@ def carregar_feed_xml(xml_file):
         preco_vista_elem = item.find("g:sale_price", ns)
         preco_prazo = float(preco_prazo_elem.text.replace("BRL","").replace(",",".").strip()) if preco_prazo_elem is not None else 0
         preco_vista = float(preco_vista_elem.text.replace("BRL","").replace(",",".").strip()) if preco_vista_elem is not None else preco_prazo
-        items.append({"SKU": str(sku), "Descrição": descricao, "Valor à Prazo": preco_prazo, "Valor à Vista": preco_vista})
+        items.append({"SKU": str(sku), "Descrição Item": descricao, "Valor à Prazo": preco_prazo, "Valor à Vista": preco_vista})
     return pd.DataFrame(items)
 
 def carregar_tipi(xlsx_file):
@@ -83,7 +84,7 @@ def carregar_ncm(csv_file):
     return df
 
 # ==========================
-# Carregar todas as bases se existirem
+# Carregar bases
 # ==========================
 if feed_file and tipi_file and ipi_file and ncm_file:
     df_feed = carregar_feed_xml(feed_file)
@@ -95,7 +96,7 @@ else:
     st.warning("⏳ Carregue todas as bases para iniciar o sistema.")
 
 # ==========================
-# Interface
+# Calculadora de IPI
 # ==========================
 if feed_file and tipi_file and ipi_file and ncm_file:
     st.subheader("🧾 Calculadora de IPI")
@@ -105,11 +106,11 @@ if feed_file and tipi_file and ipi_file and ncm_file:
     frete_valor = st.number_input("Valor do frete", min_value=0.0, step=0.01) if frete_checkbox else 0.0
 
     if st.button("Calcular IPI") and sku_input:
+        # Buscar item no feed
         item_feed = df_feed[df_feed["SKU"]==sku_input]
         if item_feed.empty:
             st.error("❌ SKU não encontrado no feed.")
         else:
-            # Busca o valor correto do feed
             valor_produto = item_feed["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item_feed["Valor à Prazo"].values[0]
             sku_info = df_ipi[df_ipi["SKU"]==sku_input]
             if sku_info.empty:
@@ -122,7 +123,7 @@ if feed_file and tipi_file and ipi_file and ncm_file:
                 st.success("✅ Cálculo realizado!")
                 st.table({
                     "SKU":[sku_input],
-                    "Descrição":[item_feed["Descrição"].values[0]],
+                    "Descrição":[item_feed["Descrição Item"].values[0]],
                     "Valor Base":[valor_base],
                     "Frete":[frete_valor],
                     "IPI":[ipi_valor],
