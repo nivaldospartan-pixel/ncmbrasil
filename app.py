@@ -6,9 +6,14 @@ import re
 from rapidfuzz import process, fuzz
 import os
 
-st.set_page_config(page_title="NCM & Calculadora de IPI", layout="wide")
+# --- Configuração da página ---
+st.set_page_config(
+    page_title="NCM & Calculadora de IPI",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 st.title("📦 NCM & 🧾 Calculadora de IPI")
-st.caption("NextSolutions - By Nivaldo Freitas")
+st.markdown("Consulta de NCM/IPI e cálculo de preço final com IPI. By **NextSolutions - Nivaldo Freitas**")
 
 # ==========================
 # Funções utilitárias
@@ -89,67 +94,74 @@ if feed_file and tipi_file and ipi_file and ncm_file:
     # ==========================
     # Consulta NCM
     # ==========================
-    st.subheader("🔍 Consulta NCM")
-    consulta_opcao = st.radio("Escolha o tipo de consulta:", ["Código", "Descrição"])
-    if consulta_opcao=="Código":
-        codigo = st.text_input("Digite o código NCM")
-        if codigo:
-            resultado = df_ncm[df_ncm["codigo"]==padronizar_codigo(codigo)]
-            if not resultado.empty:
-                st.dataframe(resultado)
-            else:
-                st.warning("❌ NCM não encontrado.")
-    else:
-        termo = st.text_input("Digite parte da descrição do produto")
-        if termo:
-            termo_norm = normalizar(termo)
-            descricoes_norm = df_ncm["descricao"].apply(normalizar)
-            escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=10)
-            resultados = []
-            for desc, score, idx in escolhas:
-                resultados.append({
-                    "codigo": df_ncm.loc[idx,"codigo"],
-                    "descricao": df_ncm.loc[idx,"descricao"],
-                    "similaridade": round(score,2)
-                })
-            st.dataframe(pd.DataFrame(resultados))
+    with st.expander("🔍 Consulta NCM/IPI"):
+        consulta_opcao = st.radio("Escolha o tipo de consulta:", ["Código", "Descrição"])
+        if consulta_opcao=="Código":
+            codigo = st.text_input("Digite o código NCM")
+            if codigo:
+                resultado = df_ncm[df_ncm["codigo"]==padronizar_codigo(codigo)]
+                if not resultado.empty:
+                    st.dataframe(resultado)
+                else:
+                    st.warning("❌ NCM não encontrado.")
+        else:
+            termo = st.text_input("Digite parte da descrição do produto")
+            if termo:
+                termo_norm = normalizar(termo)
+                descricoes_norm = df_ncm["descricao"].apply(normalizar)
+                escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=10)
+                resultados = []
+                for desc, score, idx in escolhas:
+                    resultados.append({
+                        "codigo": df_ncm.loc[idx,"codigo"],
+                        "descricao": df_ncm.loc[idx,"descricao"],
+                        "similaridade": round(score,2)
+                    })
+                st.dataframe(pd.DataFrame(resultados))
 
     st.markdown("---")
 
     # ==========================
     # Calculadora IPI
     # ==========================
-    st.subheader("🧾 Calculadora de IPI")
-    sku_input = st.text_input("Digite o SKU do produto")
-    tipo_valor = st.selectbox("Forma de pagamento", ["À Vista", "À Prazo"])
-    frete_checkbox = st.checkbox("O item possui frete?")
-    frete_valor = 0
-    if frete_checkbox:
-        frete_valor = st.number_input("Valor do frete", min_value=0.0, step=0.01)
+    with st.expander("🧾 Calculadora de IPI"):
+        st.markdown("Digite o SKU e selecione a forma de pagamento. O sistema buscará automaticamente os valores no feed XML.")
+        sku_input = st.text_input("Digite o SKU do produto")
+        tipo_valor = st.selectbox("Forma de pagamento", ["À Vista", "À Prazo"])
+        frete_checkbox = st.checkbox("O item possui frete?")
+        frete_valor = 0
+        if frete_checkbox:
+            frete_valor = st.number_input("Valor do frete", min_value=0.0, step=0.01)
 
-    if st.button("Calcular IPI") and sku_input:
-        item_feed = df_feed[df_feed["SKU"]==sku_input]
-        if item_feed.empty:
-            st.error("❌ SKU não encontrado no feed.")
-        else:
-            valor_produto = item_feed["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item_feed["Valor à Prazo"].values[0]
-            sku_info = df_ipi_itens[df_ipi_itens["SKU"]==sku_input]
-            if sku_info.empty:
-                st.error("❌ SKU não possui NCM cadastrado na planilha IPI Itens.")
+        if st.button("Calcular IPI") and sku_input:
+            item_feed = df_feed[df_feed["SKU"]==sku_input]
+            if item_feed.empty:
+                st.error("❌ SKU não encontrado no feed.")
             else:
-                ncm_pad = sku_info["NCM"].values[0]
-                ipi_tipi = df_tipi[df_tipi["codigo"]==ncm_pad]
-                ipi_percentual = float(ipi_tipi["IPI"].values[0]) if not ipi_tipi.empty else 0
-                valor_base, ipi_valor, valor_final = calcular_ipi_valor(valor_produto, ipi_percentual, frete_valor)
-                st.success("✅ Cálculo realizado!")
-                st.table({
-                    "SKU":[sku_input],
-                    "Descrição":[item_feed["Descrição"].values[0]],
-                    "Valor Base":[valor_base],
-                    "Frete":[frete_valor],
-                    "IPI":[ipi_valor],
-                    "Valor Final":[valor_final],
-                    "IPI %":[ipi_percentual]
-                })
+                valor_produto = item_feed["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item_feed["Valor à Prazo"].values[0]
+                sku_info = df_ipi_itens[df_ipi_itens["SKU"]==sku_input]
+                if sku_info.empty:
+                    st.error("❌ SKU não possui NCM cadastrado na planilha IPI Itens.")
+                else:
+                    ncm_pad = sku_info["NCM"].values[0]
+                    ipi_tipi = df_tipi[df_tipi["codigo"]==ncm_pad]
+                    ipi_percentual = float(ipi_tipi["IPI"].values[0]) if not ipi_tipi.empty else 0
+                    valor_base, ipi_valor, valor_final = calcular_ipi_valor(valor_produto, ipi_percentual, frete_valor)
+
+                    # Layout elegante com colunas
+                    st.success("✅ Cálculo realizado!")
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("SKU", sku_input)
+                    col2.metric("Descrição", item_feed["Descrição"].values[0])
+                    col3.metric("IPI %", f"{ipi_percentual}%")
+
+                    st.markdown("---")
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Valor Base", f"R$ {valor_base:.2f}")
+                    col2.metric("Frete", f"R$ {frete_valor:.2f}")
+                    col3.metric("IPI", f"R$ {ipi_valor:.2f}")
+                    st.markdown("---")
+                    st.metric("Valor Final (com IPI e Frete)", f"R$ {valor_final:.2f}")
+
 else:
     st.warning("⏳ Carregue todas as bases para iniciar o sistema.")
