@@ -90,15 +90,17 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
     try:
         tree = ET.parse(caminho_xml)
         root = tree.getroot()
-        ns = {'g': 'http://base.google.com/ns/1.0'}
-        for item in root.findall('item'):
-            g_id = item.find('g:id', ns)
+        
+        # Percorre todos os items
+        for item in root.findall('.//item'):
+            # Encontra o id, independentemente do namespace
+            g_id = item.find('.//*[local-name()="id"]')
             if g_id is not None and g_id.text.strip() == str(sku):
-                titulo = item.find('title', ns).text if item.find('title', ns) is not None else ""
-                link = item.find('link', ns).text if item.find('link', ns) is not None else ""
-                preco_prazo = item.find('g:price', ns).text if item.find('g:price', ns) is not None else ""
-                preco_vista = item.find('g:sale_price', ns).text if item.find('g:sale_price', ns) is not None else ""
-                descricao = item.find('description', ns).text if item.find('description', ns) is not None else ""
+                titulo = item.find('.//*[local-name()="title"]').text if item.find('.//*[local-name()="title"]') is not None else ""
+                link = item.find('.//*[local-name()="link"]').text if item.find('.//*[local-name()="link"]') is not None else ""
+                preco_prazo = item.find('.//*[local-name()="price"]').text if item.find('.//*[local-name()="price"]') is not None else ""
+                preco_vista = item.find('.//*[local-name()="sale_price"]').text if item.find('.//*[local-name()="sale_price"]') is not None else ""
+                descricao = item.find('.//*[local-name()="description"]').text if item.find('.//*[local-name()="description"]') is not None else ""
                 
                 preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
                 preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
