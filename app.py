@@ -12,7 +12,7 @@ from rapidfuzz import process, fuzz
 # ==========================
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide")
 st.title("📦 Dashboard NCM & IPI")
-st.markdown("Consulta NCM/IPI e cálculo de preço com IPI incluso, inspirado no design NextSolutions.pt")
+st.markdown("Consulta NCM/IPI e cálculo de preço com IPI incluso")
 
 # ==========================
 # Funções utilitárias
@@ -184,6 +184,7 @@ with tab1:
 with tab2:
     st.header("🧾 Calculadora de IPI via SKU")
     sku_input = st.text_input("Digite o SKU do produto:")
+    ncm_input = st.text_input("Digite o NCM do produto (opcional, usado se IPI não estiver na planilha):")
     tipo_valor = st.radio("Escolha o tipo de valor:", ["À Vista","À Prazo"])
     frete_checkbox = st.checkbox("Adicionar frete?")
     frete_input = st.text_input("Valor do frete:", value="0.00") if frete_checkbox else "0.00"
@@ -200,21 +201,18 @@ with tab2:
                 valor_base = item["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item["Valor à Prazo"].values[0]
                 frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
 
-                # 🔹 Buscar IPI: primeiro IPI Itens, depois TIPI.xlsx
+                # 🔹 Buscar IPI: primeiro IPI Itens
                 ipi_item = df_ipi[df_ipi["SKU"] == sku_clean]
                 if not ipi_item.empty:
                     ipi_percentual = float(ipi_item["IPI %"].values[0])
                 else:
-                    # Usar TIPI.xlsx via NCM se disponível
-                    ncm_produto = df_full[df_full["codigo"].notna()]["codigo"].iloc[0] if not df_full.empty else None
-                    if ncm_produto:
-                        ipi_tipi = df_full[df_full["codigo"] == ncm_produto]
+                    # 🔹 Buscar TIPI via NCM informado
+                    ipi_percentual = 0
+                    if ncm_input:
+                        ncm_pad = padronizar_codigo(ncm_input)
+                        ipi_tipi = df_full[df_full["codigo"] == ncm_pad]
                         if not ipi_tipi.empty and ipi_tipi["IPI"].values[0] != "NT":
                             ipi_percentual = float(ipi_tipi["IPI"].values[0])
-                        else:
-                            ipi_percentual = 0
-                    else:
-                        ipi_percentual = 0
 
                 base, ipi_valor, valor_final = calcular_preco(valor_base, ipi_percentual, frete_valor)
 
@@ -225,5 +223,6 @@ with tab2:
                     "Valor Base":[base],
                     "Frete":[frete_valor],
                     "IPI":[ipi_valor],
-                    "Valor Final":[valor_final]
+                    "Valor Final":[valor_final],
+                    "IPI %":[ipi_percentual]
                 })
