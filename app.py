@@ -6,25 +6,33 @@ import re
 import os
 import xml.etree.ElementTree as ET
 
+# ==========================
 # --- Configuração da página ---
+# ==========================
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
 
+# ==========================
 # --- Cores Vetaia Cloud ---
-BACKGROUND_COLOR = "#1A1A1A"  # fundo escuro
+# ==========================
+BACKGROUND_COLOR = "#1A1A1A"   # fundo escuro
 TEXT_COLOR = "#FFFFFF"         # texto branco
 BUTTON_COLOR = "#00A9E0"       # azul vibrante
+BUTTON_HOVER = "#0077B6"
 CARD_COLOR = "#2A2A2A"         # cartão escuro
 CARD_TEXT_COLOR = "#FFFFFF"
 
+# ==========================
+# --- Estilo Customizado ---
+# ==========================
 st.markdown(f"""
 <style>
 body {{background-color:{BACKGROUND_COLOR}; color:{TEXT_COLOR};}}
 .stButton>button {{
     background-color:{BUTTON_COLOR}; color:{TEXT_COLOR};
-    font-weight:bold; border-radius:10px; padding:10px 20px;
+    font-weight:bold; border-radius:10px; padding:12px 25px;
 }}
 .stButton>button:hover {{
-    background-color:#0077B6; color:{TEXT_COLOR};
+    background-color:{BUTTON_HOVER}; color:{TEXT_COLOR};
 }}
 .stTextInput>div>input, .stNumberInput>div>input {{
     border-radius:10px; padding:10px;
@@ -38,6 +46,9 @@ body {{background-color:{BACKGROUND_COLOR}; color:{TEXT_COLOR};}}
 </style>
 """, unsafe_allow_html=True)
 
+# ==========================
+# --- Cabeçalho ---
+# ==========================
 st.title("📦 Dashboard NCM & IPI")
 st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
 st.markdown("---")
@@ -56,7 +67,7 @@ def normalizar(texto):
     return re.sub(r"\s+", " ", texto)
 
 # ==========================
-# --- Carregamento de dados ---
+# --- Carregar dados ---
 # ==========================
 def carregar_tipi(caminho="tipi.xlsx"):
     if os.path.exists(caminho):
@@ -103,8 +114,7 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
         tree = ET.parse(caminho_xml)
         root = tree.getroot()
         for item in root.iter():
-            if item.tag.split("}")[-1] != "item":
-                continue
+            if item.tag.split("}")[-1] != "item": continue
             g_id, titulo, link, preco_prazo, preco_vista, descricao, ncm = None, "", "", "", "", "", ""
             for child in item:
                 tag = child.tag.split("}")[-1]
@@ -137,7 +147,8 @@ def calcular_preco_final(sku, valor_final_desejado, frete=0):
     valor_total = base_calculo + frete
     ipi_valor = valor_total * ipi_percentual
     valor_final = valor_total + ipi_valor
-    return descricao, {"valor_base": round(base_calculo,2),"frete": round(frete,2),"ipi": round(ipi_valor,2),"valor_final": round(valor_final,2)}, None
+    return descricao, {"valor_base": round(base_calculo,2),"frete": round(frete,2),
+                      "ipi": round(ipi_valor,2),"valor_final": round(valor_final,2)}, None
 
 def buscar_por_codigo(df, codigo):
     codigo = padronizar_codigo(codigo)
@@ -157,42 +168,44 @@ def buscar_por_descricao(df, termo, limite=10):
         codigo = df.loc[idx, "codigo"]
         ipi_val = df_tipi[df_tipi["codigo"] == codigo]["IPI"].values
         ipi_val = ipi_val[0] if len(ipi_val) > 0 else "NT"
-        resultados.append({"codigo": codigo, "descricao": df.loc[idx, "descricao"], "IPI": ipi_val, "similaridade": round(score,2)})
+        resultados.append({"codigo": codigo, "descricao": df.loc[idx, "descricao"],
+                           "IPI": ipi_val, "similaridade": round(score,2)})
     return resultados
 
 # ==========================
-# --- Interface por etapas ---
+# --- Interface passo a passo ---
 # ==========================
-if "etapa" not in st.session_state:
-    st.session_state.etapa = "inicio"
-
+if "etapa" not in st.session_state: st.session_state.etapa = "inicio"
 etapa = st.session_state.etapa
 
+def botao_voltar():
+    if st.button("⬅ Voltar"):
+        st.session_state.etapa = "inicio"
+        st.experimental_rerun()
+
+# --- Etapa Inicio ---
 if etapa == "inicio":
     st.markdown(f"<div style='padding:20px; background-color:{CARD_COLOR}; border-radius:10px'>"
                 "<h3>Escolha uma funcionalidade:</h3></div>", unsafe_allow_html=True)
-    if st.button("Consulta de SKU 🔍"):
-        st.session_state.etapa = "sku"
-        st.experimental_rerun()
-    if st.button("Cálculo do IPI 💰"):
-        st.session_state.etapa = "ipi"
-        st.experimental_rerun()
-    if st.button("Consulta NCM/IPI 📦"):
-        st.session_state.etapa = "ncm"
-        st.experimental_rerun()
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Consulta de SKU 🔍"): st.session_state.etapa = "sku"; st.experimental_rerun()
+    with col2:
+        if st.button("Cálculo do IPI 💰"): st.session_state.etapa = "ipi"; st.experimental_rerun()
+    with col3:
+        if st.button("Consulta NCM/IPI 📦"): st.session_state.etapa = "ncm"; st.experimental_rerun()
 
+# --- Etapa SKU ---
 elif etapa == "sku":
-    st.subheader("Consulta de SKU no XML")
-    if st.button("Voltar"):
-        st.session_state.etapa = "inicio"
-        st.experimental_rerun()
+    st.subheader("🔍 Consulta de SKU no XML")
+    botao_voltar()
     sku_input = st.text_input("Digite o SKU do produto:")
     if sku_input:
         item_info, erro = buscar_sku_xml(sku_input)
         if erro: st.error(erro)
         else:
             st.markdown(f"""
-            <div style='background-color:{CARD_COLOR}; padding:15px; border-radius:10px; color:{CARD_TEXT_COLOR}'>
+            <div style='background-color:{CARD_COLOR}; padding:20px; border-radius:10px; color:{CARD_TEXT_COLOR}'>
             <h4>{item_info['Título']}</h4>
             <p>{item_info['Descrição']}</p>
             <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
@@ -201,11 +214,10 @@ elif etapa == "sku":
             </div>
             """, unsafe_allow_html=True)
 
+# --- Etapa IPI ---
 elif etapa == "ipi":
-    st.subheader("Cálculo do IPI")
-    if st.button("Voltar"):
-        st.session_state.etapa = "inicio"
-        st.experimental_rerun()
+    st.subheader("💰 Cálculo do IPI")
+    botao_voltar()
     sku_calc = st.text_input("Digite o SKU para calcular o IPI:", key="calc_sku")
     if sku_calc:
         item_info, erro = buscar_sku_xml(sku_calc)
@@ -224,7 +236,7 @@ elif etapa == "ipi":
                     if erro_calc: st.error(erro_calc)
                     else:
                         st.markdown(f"""
-                        <div style='background-color:{CARD_COLOR}; padding:15px; border-radius:10px; color:{CARD_TEXT_COLOR}'>
+                        <div style='background-color:{CARD_COLOR}; padding:20px; border-radius:10px; color:{CARD_TEXT_COLOR}'>
                         <h4>Resultado do Cálculo</h4>
                         <p><b>SKU:</b> {sku_calc}</p>
                         <p><b>Valor Selecionado:</b> R$ {valor_produto}</p>
@@ -237,11 +249,10 @@ elif etapa == "ipi":
                         </div>
                         """, unsafe_allow_html=True)
 
+# --- Etapa NCM/IPI ---
 elif etapa == "ncm":
-    st.subheader("Consulta NCM/IPI")
-    if st.button("Voltar"):
-        st.session_state.etapa = "inicio"
-        st.experimental_rerun()
+    st.subheader("📦 Consulta NCM/IPI")
+    botao_voltar()
     opcao_busca = st.radio("Tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
     if opcao_busca == "Por código":
         codigo_input = st.text_input("Digite o código NCM:", key="ncm_codigo")
