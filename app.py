@@ -86,25 +86,27 @@ def carregar_tipi(caminho="tipi.xlsx"):
 def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
     if not os.path.exists(caminho_xml):
         return None, "Arquivo XML não encontrado."
-    
+
     try:
         tree = ET.parse(caminho_xml)
         root = tree.getroot()
-        
-        # Percorre todos os items
-        for item in root.findall('item'):
+
+        # percorre todos os elementos item em qualquer nível
+        for item in root.iter():
+            if item.tag.split("}")[-1] != "item":
+                continue
+
             g_id = None
             titulo = ""
             link = ""
             preco_prazo = ""
             preco_vista = ""
             descricao = ""
-            
-            # Percorre todos os filhos do item
+
             for child in item:
-                tag = child.tag.split("}")[-1]  # ignora namespace
+                tag = child.tag.split("}")[-1]
                 text = child.text.strip() if child.text else ""
-                
+
                 if tag == "id":
                     g_id = text
                 elif tag == "title":
@@ -117,11 +119,11 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
                     preco_vista = text
                 elif tag == "description":
                     descricao = text
-            
+
             if g_id == str(sku):
                 preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
                 preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
-                
+
                 return {
                     "SKU": sku,
                     "Título": titulo,
@@ -130,7 +132,7 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
                     "Valor à Vista": preco_vista_val,
                     "Descrição": descricao
                 }, None
-        
+
         return None, "SKU não encontrado no XML."
     except ET.ParseError:
         return None, "Erro ao ler o XML."
