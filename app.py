@@ -9,9 +9,9 @@ import os
 # ==========================
 # Configuração da página
 # ==========================
-st.set_page_config(page_title="Calculadora de IPI - NextSolutions", layout="wide")
-st.title("📦 Calculadora de IPI - NextSolutions")
-st.markdown("Calcule o preço final do produto com IPI incluso, com base no feed XML e planilhas de TIPI e IPI Itens.")
+st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide")
+st.title("📦 Dashboard NCM & IPI")
+st.markdown("Consulta NCM/IPI e cálculo de preço com IPI incluso, inspirado no design NextSolutions.pt")
 
 # ==========================
 # Funções utilitárias
@@ -32,7 +32,32 @@ def calcular_preco(valor_base, ipi_percentual, frete=0):
     return round(valor_base,2), round(ipi_valor,2), round(valor_final,2)
 
 # ==========================
-# Carregar TIPI.xlsx e NCM
+# Consulta NCM
+# ==========================
+def buscar_por_codigo(df, codigo):
+    codigo = padronizar_codigo(codigo)
+    resultado = df[df["codigo"] == codigo]
+    if not resultado.empty:
+        return resultado.to_dict(orient="records")
+    return {"erro": f"NCM {codigo} não encontrado"}
+
+def buscar_por_descricao(df, termo, limite=10):
+    termo_norm = normalizar(termo)
+    descricoes_norm = df["descricao"].apply(normalizar)
+    from rapidfuzz import process, fuzz
+    escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=limite)
+    resultados = []
+    for desc, score, idx in escolhas:
+        resultados.append({
+            "codigo": df.loc[idx, "codigo"],
+            "descricao": df.loc[idx, "descricao"],
+            "IPI": df.loc[idx, "IPI"] if "IPI" in df.columns else "NT",
+            "similaridade": round(score, 2)
+        })
+    return resultados
+
+# ==========================
+# Carregar TIPI.xlsx, NCM e IPI Itens
 # ==========================
 def carregar_ncm(caminho="ncm_todos.csv"):
     if os.path.exists(caminho):
@@ -130,41 +155,68 @@ else:
     df_full["IPI"] = "NT"
 
 # ==========================
-# Calculadora de IPI
+# Interface com abas
 # ==========================
-st.header("🧾 Calculadora de IPI via SKU")
-sku_input = st.text_input("Digite o SKU do produto:")
-tipo_valor = st.radio("Escolha o tipo de valor:", ["À Vista","À Prazo"])
-frete_checkbox = st.checkbox("Adicionar frete?")
-frete_input = st.text_input("Valor do frete:", value="0.00") if frete_checkbox else "0.00"
+tab1, tab2 = st.tabs(["Consulta NCM/IPI","Calculadora IPI via SKU"])
 
-if st.button("Calcular Preço"):
-    if not sku_input:
-        st.warning("Informe o SKU.")
-    else:
-        sku_clean = sku_input.strip()
-        item = df_feed[df_feed["SKU"]==sku_clean]
-        if item.empty:
-            st.error("SKU não encontrado no feed.")
-        else:
-            valor_base = item["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item["Valor à Prazo"].values[0]
-            frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
-
-            # Busca IPI primeiro no SKU
-            ipi_item = df_ipi[df_ipi["SKU"]==sku_clean]
-            if not ipi_item.empty:
-                ipi_percentual = float(ipi_item["IPI %"].values[0])
+# --- Aba 1: Consulta NCM/IPI ---
+with tab1:
+    st.header("🔍 Consulta de NCM/IPI")
+    opcao = st.radio("Escolha o tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
+    if opcao == "Por código":
+        codigo_input = st.text_input("Digite o código NCM (ex: 8424.89.90)")
+        if codigo_input:
+            resultado = buscar_por_codigo(df_full, codigo_input)
+            if isinstance(resultado, dict) and "erro" in resultado:
+                st.warning(resultado["erro"])
             else:
-                ipi_percentual = 0
+                st.dataframe(pd.DataFrame(resultado).reset_index(drop=True), height=300)
+    elif opcao == "Por descrição":
+        termo_input = st.text_input("Digite parte da descrição do produto")
+        if termo_input:
+            resultados = buscar_por_descricao(df_full, termo_input)
+            if resultados:
+                df_resultados = pd.DataFrame(resultados)
+                df_resultados = df_resultados.sort_values(by="similaridade", ascending=False).reset_index(drop=True)
+                df_resultados["IPI"] = df_resultados["IPI"].apply(lambda x: f"✅ {x}" if x != "NT" else f"❌ {x}")
+                st.dataframe(df_resultados, height=400)
+            else:
+                st.warning("⚠️ Nenhum resultado encontrado.")
 
-            base, ipi_valor, valor_final = calcular_preco(valor_base, ipi_percentual, frete_valor)
+# --- Aba 2: Calculadora de IPI via SKU ---
+with tab2:
+    st.header("🧾 Calculadora de IPI via SKU")
+    sku_input = st.text_input("Digite o SKU do produto:")
+    tipo_valor = st.radio("Escolha o tipo de valor:", ["À Vista","À Prazo"])
+    frete_checkbox = st.checkbox("Adicionar frete?")
+    frete_input = st.text_input("Valor do frete:", value="0.00") if frete_checkbox else "0.00"
 
-            st.success(f"✅ Cálculo realizado para SKU {sku_input}")
-            st.table({
-                "SKU":[sku_input],
-                "Descrição":[item["Descrição"].values[0]],
-                "Valor Base":[base],
-                "Frete":[frete_valor],
-                "IPI":[ipi_valor],
-                "Valor Final":[valor_final]
-            })
+    if st.button("Calcular Preço"):
+        if not sku_input:
+            st.warning("Informe o SKU do produto.")
+        else:
+            sku_input_clean = sku_input.strip()
+            item = df_feed[df_feed["SKU"] == sku_input_clean]
+            if item.empty:
+                st.error("SKU não encontrado no feed.")
+            else:
+                valor_base = item["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item["Valor à Prazo"].values[0]
+                frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
+
+                ipi_item = df_ipi[df_ipi["SKU"] == sku_input_clean]
+                if not ipi_item.empty:
+                    ipi_percentual = float(ipi_item["IPI %"].values[0])
+                else:
+                    ipi_percentual = 0
+
+                base, ipi_valor, valor_final = calcular_preco(valor_base, ipi_percentual, frete_valor)
+
+                st.success(f"✅ Cálculo realizado para SKU {sku_input_clean}")
+                st.table({
+                    "SKU":[sku_input_clean],
+                    "Descrição":[item["Descrição"].values[0]],
+                    "Valor Base":[base],
+                    "Frete":[frete_valor],
+                    "IPI":[ipi_valor],
+                    "Valor Final":[valor_final]
+                })
