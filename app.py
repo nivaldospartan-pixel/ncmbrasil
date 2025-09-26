@@ -8,18 +8,35 @@ import xml.etree.ElementTree as ET
 
 # --- Configuração da página ---
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
-st.markdown(
-    """
-    <style>
-    .stButton>button {background-color:#4B8BBE; color:white; font-weight:bold; border-radius:10px; padding:10px 20px;}
-    .stRadio>div>div {flex-direction:row;}
-    .stTextInput>div>input {border-radius:10px; padding:10px;}
-    .stNumberInput>div>input {border-radius:10px; padding:10px;}
-    .stTable {border-radius:10px; overflow:hidden;}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+
+# --- Estilo com cores do Vetaia Cloud ---
+BACKGROUND_COLOR = "#1A1A1A"  # fundo escuro
+TEXT_COLOR = "#FFFFFF"         # texto branco
+BUTTON_COLOR = "#00A9E0"       # azul vibrante
+CARD_COLOR = "#2A2A2A"         # cartão escuro
+CARD_TEXT_COLOR = "#FFFFFF"
+
+st.markdown(f"""
+<style>
+body {{background-color:{BACKGROUND_COLOR}; color:{TEXT_COLOR};}}
+.stButton>button {{
+    background-color:{BUTTON_COLOR}; color:{TEXT_COLOR};
+    font-weight:bold; border-radius:10px; padding:10px 20px;
+}}
+.stButton>button:hover {{
+    background-color:#0077B6; color:{TEXT_COLOR};
+}}
+.stTextInput>div>input, .stNumberInput>div>input {{
+    border-radius:10px; padding:10px;
+    background-color:#333333; color:{TEXT_COLOR};
+}}
+.stRadio>div>div {{flex-direction:row;}}
+.stTable {{
+    border-radius:10px; overflow:hidden; color:{TEXT_COLOR};
+    background-color:{CARD_COLOR};
+}}
+</style>
+""", unsafe_allow_html=True)
 
 st.title("📦 Dashboard NCM & IPI")
 st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
@@ -144,20 +161,35 @@ def buscar_por_descricao(df, termo, limite=10):
     return resultados
 
 # ==========================
-# --- Interface Streamlit ---
+# --- Interface com etapas por botões ---
 # ==========================
-tab1, tab2, tab3 = st.tabs(["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦"])
+etapa = st.session_state.get("etapa", "inicio")
 
-with tab1:
+if etapa == "inicio":
+    st.markdown(f"<div style='padding:20px; background-color:{CARD_COLOR}; border-radius:10px'>"
+                "<h3>Escolha uma funcionalidade:</h3></div>", unsafe_allow_html=True)
+    if st.button("Consulta de SKU 🔍"):
+        st.session_state.etapa = "sku"
+        st.experimental_rerun()
+    if st.button("Cálculo do IPI 💰"):
+        st.session_state.etapa = "ipi"
+        st.experimental_rerun()
+    if st.button("Consulta NCM/IPI 📦"):
+        st.session_state.etapa = "ncm"
+        st.experimental_rerun()
+
+elif etapa == "sku":
     st.subheader("Consulta de SKU no XML")
+    if st.button("Voltar"):
+        st.session_state.etapa = "inicio"
+        st.experimental_rerun()
     sku_input = st.text_input("Digite o SKU do produto:")
     if sku_input:
         item_info, erro = buscar_sku_xml(sku_input)
-        if erro:
-            st.error(erro)
+        if erro: st.error(erro)
         else:
             st.markdown(f"""
-            <div style='background-color:#f0f2f6; padding:15px; border-radius:10px'>
+            <div style='background-color:{CARD_COLOR}; padding:15px; border-radius:10px; color:{CARD_TEXT_COLOR}'>
             <h4>{item_info['Título']}</h4>
             <p>{item_info['Descrição']}</p>
             <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
@@ -166,13 +198,15 @@ with tab1:
             </div>
             """, unsafe_allow_html=True)
 
-with tab2:
+elif etapa == "ipi":
     st.subheader("Cálculo do IPI")
+    if st.button("Voltar"):
+        st.session_state.etapa = "inicio"
+        st.experimental_rerun()
     sku_calc = st.text_input("Digite o SKU para calcular o IPI:", key="calc_sku")
     if sku_calc:
         item_info, erro = buscar_sku_xml(sku_calc)
-        if erro:
-            st.error(erro)
+        if erro: st.error(erro)
         else:
             opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo", "À Vista"])
             valor_produto = item_info["Valor à Prazo"] if opcao_valor=="À Prazo" else item_info["Valor à Vista"]
@@ -184,11 +218,10 @@ with tab2:
                 try:
                     valor_final = float(valor_final_input.replace(",", "."))
                     descricao, resultado, erro_calc = calcular_preco_final(sku_calc, valor_final, frete_valor)
-                    if erro_calc:
-                        st.error(erro_calc)
+                    if erro_calc: st.error(erro_calc)
                     else:
                         st.markdown(f"""
-                        <div style='background-color:#eaf2f8; padding:15px; border-radius:10px'>
+                        <div style='background-color:{CARD_COLOR}; padding:15px; border-radius:10px; color:{CARD_TEXT_COLOR}'>
                         <h4>Resultado do Cálculo</h4>
                         <p><b>SKU:</b> {sku_calc}</p>
                         <p><b>Valor Selecionado:</b> R$ {valor_produto}</p>
@@ -200,11 +233,12 @@ with tab2:
                         <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
                         </div>
                         """, unsafe_allow_html=True)
-                except ValueError:
-                    st.error("Valores inválidos. Use apenas números para valor final e frete.")
 
-with tab3:
+elif etapa == "ncm":
     st.subheader("Consulta NCM/IPI")
+    if st.button("Voltar"):
+        st.session_state.etapa = "inicio"
+        st.experimental_rerun()
     opcao_busca = st.radio("Tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
     if opcao_busca == "Por código":
         codigo_input = st.text_input("Digite o código NCM:", key="ncm_codigo")
