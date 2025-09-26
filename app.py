@@ -6,24 +6,18 @@ import re
 import os
 import xml.etree.ElementTree as ET
 
-# ==========================
 # --- Configuração da página ---
-# ==========================
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
 
-# ==========================
 # --- Cores Vetaia Cloud ---
-# ==========================
-BACKGROUND_COLOR = "#1A1A1A"   # fundo escuro
-TEXT_COLOR = "#FFFFFF"         # texto branco
-BUTTON_COLOR = "#00A9E0"       # azul vibrante
+BACKGROUND_COLOR = "#1A1A1A"
+TEXT_COLOR = "#FFFFFF"
+BUTTON_COLOR = "#00A9E0"
 BUTTON_HOVER = "#0077B6"
-CARD_COLOR = "#2A2A2A"         # cartão escuro
+CARD_COLOR = "#2A2A2A"
 CARD_TEXT_COLOR = "#FFFFFF"
 
-# ==========================
-# --- Estilo Customizado ---
-# ==========================
+# --- Estilos ---
 st.markdown(f"""
 <style>
 body {{background-color:{BACKGROUND_COLOR}; color:{TEXT_COLOR};}}
@@ -31,9 +25,7 @@ body {{background-color:{BACKGROUND_COLOR}; color:{TEXT_COLOR};}}
     background-color:{BUTTON_COLOR}; color:{TEXT_COLOR};
     font-weight:bold; border-radius:10px; padding:12px 25px;
 }}
-.stButton>button:hover {{
-    background-color:{BUTTON_HOVER}; color:{TEXT_COLOR};
-}}
+.stButton>button:hover {{background-color:{BUTTON_HOVER}; color:{TEXT_COLOR};}}
 .stTextInput>div>input, .stNumberInput>div>input {{
     border-radius:10px; padding:10px;
     background-color:#333333; color:{TEXT_COLOR};
@@ -46,20 +38,16 @@ body {{background-color:{BACKGROUND_COLOR}; color:{TEXT_COLOR};}}
 </style>
 """, unsafe_allow_html=True)
 
-# ==========================
-# --- Cabeçalho ---
-# ==========================
 st.title("📦 Dashboard NCM & IPI")
 st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
 st.markdown("---")
 
 # ==========================
-# --- Funções utilitárias ---
+# Funções utilitárias
 # ==========================
 def padronizar_codigo(codigo):
     codigo = str(codigo).replace(".", "").strip()
-    codigo = codigo[:8].zfill(8)
-    return codigo
+    return codigo[:8].zfill(8)
 
 def normalizar(texto):
     texto = unidecode.unidecode(str(texto).lower())
@@ -67,7 +55,7 @@ def normalizar(texto):
     return re.sub(r"\s+", " ", texto)
 
 # ==========================
-# --- Carregar dados ---
+# Carregar dados
 # ==========================
 def carregar_tipi(caminho="tipi.xlsx"):
     if os.path.exists(caminho):
@@ -105,7 +93,7 @@ df_ipi = carregar_ipi_itens()
 df_ncm = carregar_ncm()
 
 # ==========================
-# --- Funções principais ---
+# Funções principais
 # ==========================
 def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
     if not os.path.exists(caminho_xml):
@@ -173,7 +161,7 @@ def buscar_por_descricao(df, termo, limite=10):
     return resultados
 
 # ==========================
-# --- Interface passo a passo ---
+# Interface passo a passo
 # ==========================
 if "etapa" not in st.session_state: st.session_state.etapa = "inicio"
 etapa = st.session_state.etapa
@@ -196,7 +184,7 @@ if etapa == "inicio":
         if st.button("Consulta NCM/IPI 📦"): st.session_state.etapa = "ncm"; st.experimental_rerun()
 
 # --- Etapa SKU ---
-elif etapa == "sku":
+if etapa == "sku":
     st.subheader("🔍 Consulta de SKU no XML")
     botao_voltar()
     sku_input = st.text_input("Digite o SKU do produto:")
@@ -215,7 +203,7 @@ elif etapa == "sku":
             """, unsafe_allow_html=True)
 
 # --- Etapa IPI ---
-elif etapa == "ipi":
+if etapa == "ipi":
     st.subheader("💰 Cálculo do IPI")
     botao_voltar()
     sku_calc = st.text_input("Digite o SKU para calcular o IPI:", key="calc_sku")
@@ -250,7 +238,7 @@ elif etapa == "ipi":
                         """, unsafe_allow_html=True)
 
 # --- Etapa NCM/IPI ---
-elif etapa == "ncm":
+if etapa == "ncm":
     st.subheader("📦 Consulta NCM/IPI")
     botao_voltar()
     opcao_busca = st.radio("Tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
