@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 # --- Configuração da página ---
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
 
-# --- Estilo com cores do Vetaia Cloud ---
+# --- Cores Vetaia Cloud ---
 BACKGROUND_COLOR = "#1A1A1A"  # fundo escuro
 TEXT_COLOR = "#FFFFFF"         # texto branco
 BUTTON_COLOR = "#00A9E0"       # azul vibrante
@@ -161,9 +161,12 @@ def buscar_por_descricao(df, termo, limite=10):
     return resultados
 
 # ==========================
-# --- Interface com etapas por botões ---
+# --- Interface por etapas ---
 # ==========================
-etapa = st.session_state.get("etapa", "inicio")
+if "etapa" not in st.session_state:
+    st.session_state.etapa = "inicio"
+
+etapa = st.session_state.etapa
 
 if etapa == "inicio":
     st.markdown(f"<div style='padding:20px; background-color:{CARD_COLOR}; border-radius:10px'>"
