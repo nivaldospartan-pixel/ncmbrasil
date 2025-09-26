@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 import unidecode
 import re
 from rapidfuzz import process, fuzz
+import os
 
 st.set_page_config(page_title="Consulta NCM e Calculadora IPI", layout="wide")
 st.title("📦 Consulta NCM & 🧾 Calculadora de IPI")
@@ -29,7 +30,7 @@ def calcular_ipi_valor(valor_produto, ipi_percentual, frete=0):
     return round(valor_base,2), round(ipi_valor,2), round(valor_final,2)
 
 # ==========================
-# Carregamento das bases
+# Funções de carregamento
 # ==========================
 def carregar_feed_xml(xml_file):
     try:
@@ -96,7 +97,7 @@ def buscar_ncm_por_descricao(df, termo, limite=10):
     return resultados
 
 # ==========================
-# Upload de arquivos
+# Upload ou arquivos padrão
 # ==========================
 st.sidebar.header("📂 Carregar arquivos de base")
 feed_file = st.sidebar.file_uploader("Upload Feed XML", type=["xml"])
@@ -104,88 +105,89 @@ tipi_file = st.sidebar.file_uploader("Upload TIPI.xlsx", type=["xlsx"])
 ipi_file = st.sidebar.file_uploader("Upload IPI Itens.xlsx", type=["xlsx"])
 ncm_file = st.sidebar.file_uploader("Upload NCM.csv", type=["csv"])
 
-# ==========================
+# Carregar arquivos padrão se upload não fornecido
+if feed_file is None and os.path.exists("GoogleShopping_full.xml"):
+    feed_file = "GoogleShopping_full.xml"
+if tipi_file is None and os.path.exists("TIPI.xlsx"):
+    tipi_file = "TIPI.xlsx"
+if ipi_file is None and os.path.exists("IPI Itens.xlsx"):
+    ipi_file = "IPI Itens.xlsx"
+if ncm_file is None and os.path.exists("NCM.csv"):
+    ncm_file = "NCM.csv"
+
 # Inicialização das bases
-# ==========================
-df_feed, df_tipi, df_ipi_itens, df_ncm = None, None, None, None
-
-if feed_file:
+try:
     df_feed = carregar_feed_xml(feed_file)
-if tipi_file:
     df_tipi = carregar_tipi(tipi_file)
-if ipi_file:
     df_ipi_itens = carregar_ipi_itens(ipi_file)
-if ncm_file:
     df_ncm = carregar_ncm(ncm_file)
-
-if df_feed is not None and df_tipi is not None and df_ipi_itens is not None and df_ncm is not None:
     st.success("✅ Bases carregadas com sucesso!")
+except Exception as e:
+    st.error(f"Erro ao carregar bases: {e}")
+    st.stop()
 
-    # ==========================
-    # Consulta NCM
-    # ==========================
-    st.subheader("🔍 Consulta NCM")
-    consulta_opcao = st.radio("Escolha o tipo de consulta:", ["Código", "Descrição"])
-    if consulta_opcao=="Código":
-        codigo = st.text_input("Digite o código NCM")
-        if codigo:
-            res = buscar_ncm_por_codigo(df_ncm, codigo)
-            if res is not None:
-                st.dataframe(res)
-            else:
-                st.warning("❌ NCM não encontrado.")
-    else:
-        termo = st.text_input("Digite parte da descrição")
-        if termo:
-            resultados = buscar_ncm_por_descricao(df_ncm, termo)
-            if resultados:
-                st.dataframe(pd.DataFrame(resultados))
-            else:
-                st.warning("❌ Nenhum resultado encontrado.")
-
-    st.markdown("---")
-
-    # ==========================
-    # Calculadora IPI
-    # ==========================
-    st.subheader("🧾 Calculadora de IPI")
-    sku_input = st.text_input("Digite o SKU do produto")
-    tipo_valor = st.selectbox("Forma de pagamento", ["À Vista", "À Prazo"])
-    frete_incluso = st.radio("O item tem frete?", ["Não", "Sim"])
-    frete_valor = 0
-    if frete_incluso=="Sim":
-        frete_valor = st.number_input("Digite o valor do frete:", min_value=0.0, step=0.01)
-
-    if st.button("Calcular IPI") and sku_input:
-        item_feed = df_feed[df_feed["SKU"]==sku_input]
-        if item_feed.empty:
-            st.error("❌ SKU não encontrado no feed.")
+# ==========================
+# Consulta NCM
+# ==========================
+st.subheader("🔍 Consulta NCM")
+consulta_opcao = st.radio("Escolha o tipo de consulta:", ["Código", "Descrição"])
+if consulta_opcao=="Código":
+    codigo = st.text_input("Digite o código NCM")
+    if codigo:
+        res = buscar_ncm_por_codigo(df_ncm, codigo)
+        if res is not None:
+            st.dataframe(res)
         else:
-            valor_produto = item_feed["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item_feed["Valor à Prazo"].values[0]
-            sku_info = df_ipi_itens[df_ipi_itens["SKU"]==sku_input]
-            if sku_info.empty:
-                st.error("❌ SKU não possui NCM cadastrado na planilha IPI Itens.")
-            else:
-                ncm_pad = sku_info["NCM"].values[0]
-                ipi_tipi = df_tipi[df_tipi["codigo"]==ncm_pad]
-                if ipi_tipi.empty:
-                    st.warning(f"⚠️ NCM {ncm_pad} não encontrado na TIPI. IPI será considerado 0%")
-                    ipi_percentual = 0
-                else:
-                    ipi_percentual = float(ipi_tipi["IPI"].values[0])
-                valor_base, ipi_valor, valor_final = calcular_ipi_valor(valor_produto, ipi_percentual, frete_valor)
-
-                df_resultado = pd.DataFrame([{
-                    "SKU": sku_input,
-                    "Descrição": item_feed["Descrição"].values[0],
-                    "Valor Base": valor_base,
-                    "Frete": frete_valor,
-                    "IPI": ipi_valor,
-                    "Valor Final": valor_final,
-                    "IPI %": ipi_percentual
-                }])
-                st.success("✅ Cálculo realizado!")
-                st.dataframe(df_resultado)
-
+            st.warning("❌ NCM não encontrado.")
 else:
-    st.warning("⏳ Carregue todas as bases para iniciar o sistema.")
+    termo = st.text_input("Digite parte da descrição")
+    if termo:
+        resultados = buscar_ncm_por_descricao(df_ncm, termo)
+        if resultados:
+            st.dataframe(pd.DataFrame(resultados))
+        else:
+            st.warning("❌ Nenhum resultado encontrado.")
+
+st.markdown("---")
+
+# ==========================
+# Calculadora IPI
+# ==========================
+st.subheader("🧾 Calculadora de IPI")
+sku_input = st.text_input("Digite o SKU do produto")
+tipo_valor = st.selectbox("Forma de pagamento", ["À Vista", "À Prazo"])
+frete_incluso = st.radio("O item tem frete?", ["Não", "Sim"])
+frete_valor = 0
+if frete_incluso=="Sim":
+    frete_valor = st.number_input("Digite o valor do frete:", min_value=0.0, step=0.01)
+
+if st.button("Calcular IPI") and sku_input:
+    item_feed = df_feed[df_feed["SKU"]==sku_input]
+    if item_feed.empty:
+        st.error("❌ SKU não encontrado no feed.")
+    else:
+        valor_produto = item_feed["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item_feed["Valor à Prazo"].values[0]
+        sku_info = df_ipi_itens[df_ipi_itens["SKU"]==sku_input]
+        if sku_info.empty:
+            st.error("❌ SKU não possui NCM cadastrado na planilha IPI Itens.")
+        else:
+            ncm_pad = sku_info["NCM"].values[0]
+            ipi_tipi = df_tipi[df_tipi["codigo"]==ncm_pad]
+            if ipi_tipi.empty:
+                st.warning(f"⚠️ NCM {ncm_pad} não encontrado na TIPI. IPI será considerado 0%")
+                ipi_percentual = 0
+            else:
+                ipi_percentual = float(ipi_tipi["IPI"].values[0])
+            valor_base, ipi_valor, valor_final = calcular_ipi_valor(valor_produto, ipi_percentual, frete_valor)
+
+            df_resultado = pd.DataFrame([{
+                "SKU": sku_input,
+                "Descrição": item_feed["Descrição"].values[0],
+                "Valor Base": valor_base,
+                "Frete": frete_valor,
+                "IPI": ipi_valor,
+                "Valor Final": valor_final,
+                "IPI %": ipi_percentual
+            }])
+            st.success("✅ Cálculo realizado!")
+            st.dataframe(df_resultado)
