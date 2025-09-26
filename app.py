@@ -144,7 +144,6 @@ else:
 ipi_upload = st.sidebar.file_uploader("Arquivo Excel com SKU e IPI %", type=["xlsx"])
 if ipi_upload:
     df_ipi = pd.read_excel(ipi_upload, engine="openpyxl")
-    # Limpeza de dados
     df_ipi.columns = [c.strip() for c in df_ipi.columns]
     df_ipi["SKU"] = df_ipi["SKU"].astype(str).str.strip()
     df_ipi["IPI %"] = df_ipi["IPI %"].astype(str).str.replace(",", ".").astype(float)
@@ -200,12 +199,24 @@ with tab2:
             else:
                 valor_base = item["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item["Valor à Prazo"].values[0]
                 frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
+
+                # Busca do IPI: primeiro SKU, depois NCM
                 ipi_item = df_ipi[df_ipi["SKU"] == sku_input_clean]
                 if not ipi_item.empty:
                     ipi_percentual = float(ipi_item["IPI %"].values[0])
                 else:
-                    st.warning(f"⚠️ SKU {sku_input} não encontrado na planilha IPI. Usando IPI = 0%")
-                    ipi_percentual = 0
+                    # Tentar buscar via NCM
+                    ncm_col = "NCM"  # caso tenha vínculo do feed → NCM
+                    if ncm_col in df_feed.columns:
+                        ncm_produto = df_feed[df_feed["SKU"] == sku_input_clean][ncm_col].values[0]
+                        ipi_ncm = df_full[df_full["codigo"] == padronizar_codigo(ncm_produto)]
+                        if not ipi_ncm.empty and ipi_ncm["IPI"].values[0] != "NT":
+                            ipi_percentual = float(ipi_ncm["IPI"].values[0])
+                        else:
+                            ipi_percentual = 0
+                    else:
+                        ipi_percentual = 0
+
                 base, ipi_valor, valor_final = calcular_preco(valor_base, ipi_percentual, frete_valor)
                 st.success(f"✅ Cálculo realizado para SKU {sku_input}")
                 st.table({
