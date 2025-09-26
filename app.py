@@ -85,11 +85,15 @@ def carregar_tipi(caminho="tipi.xlsx"):
 # ==========================
 # Funções Feed XML
 # ==========================
-def carregar_feed_xml(url):
+def carregar_feed_xml(url=None, file=None):
     try:
-        response = requests.get(url)
-        response.raise_for_status()
-        root = ET.fromstring(response.content)
+        if file:
+            tree = ET.parse(file)
+            root = tree.getroot()
+        else:
+            response = requests.get(url)
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
         items = []
         for item in root.findall(".//item"):
             sku = item.find("g:id").text if item.find("g:id") is not None else ""
@@ -110,7 +114,7 @@ def carregar_feed_xml(url):
         df_feed["SKU"] = df_feed["SKU"].astype(str)
         return df_feed
     except Exception as e:
-        st.error(f"Erro ao carregar XML: {e}")
+        st.error(f"Erro ao carregar feed XML: {e}")
         return pd.DataFrame(columns=["SKU","Descrição","Valor à Prazo","Valor à Vista"])
 
 def calcular_preco(valor_base, ipi_percentual, frete=0):
@@ -126,10 +130,17 @@ df_tipi = carregar_tipi()
 df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
 df_full["IPI"] = df_full["IPI"].fillna("NT")
 
-feed_url = "https://www.hfmultiferramentas.com.br/media/feed/GoogleShopping_full.xml"
-df_feed = carregar_feed_xml(feed_url)
+# ==========================
+# Upload de feed XML opcional
+# ==========================
+st.sidebar.header("📂 Upload de arquivos")
+feed_file = st.sidebar.file_uploader("Carregue o feed XML (GoogleShopping_full.xml)", type=["xml"])
+if feed_file:
+    df_feed = carregar_feed_xml(file=feed_file)
+else:
+    feed_url = "https://www.hfmultiferramentas.com.br/media/feed/GoogleShopping_full.xml"
+    df_feed = carregar_feed_xml(url=feed_url)
 
-st.sidebar.header("📂 Upload opcional de planilhas")
 ipi_upload = st.sidebar.file_uploader("Arquivo Excel com SKU e IPI %", type=["xlsx"])
 if ipi_upload:
     df_ipi = pd.read_excel(ipi_upload)
