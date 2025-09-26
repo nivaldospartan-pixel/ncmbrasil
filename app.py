@@ -4,7 +4,6 @@ import unidecode
 import re
 import xml.etree.ElementTree as ET
 import requests
-import os
 from rapidfuzz import process, fuzz
 
 # ==========================
@@ -60,16 +59,16 @@ def buscar_por_descricao(df, termo, limite=10):
 # Carregar arquivos
 # ==========================
 def carregar_ncm(caminho="ncm_todos.csv"):
-    if os.path.exists(caminho):
+    if caminho and caminho.endswith(".csv"):
         df = pd.read_csv(caminho, dtype=str)
         df.rename(columns={df.columns[0]: "codigo", df.columns[1]: "descricao"}, inplace=True)
         df["codigo"] = df["codigo"].apply(padronizar_codigo)
         df["descricao"] = df["descricao"].astype(str)
         return df
-    return pd.DataFrame(columns=["codigo", "descricao"])
+    return pd.DataFrame(columns=["codigo","descricao"])
 
-def carregar_tipi(caminho="tipi.xlsx"):
-    if os.path.exists(caminho):
+def carregar_tipi(caminho="TIPI.xlsx"):
+    if caminho:
         df = pd.read_excel(caminho, dtype=str)
         df.columns = [unidecode.unidecode(c.strip().lower()) for c in df.columns]
         if "ncm" in df.columns and "aliquota (%)" in df.columns:
@@ -80,16 +79,19 @@ def carregar_tipi(caminho="tipi.xlsx"):
             return df
     return pd.DataFrame(columns=["codigo","IPI"])
 
-def carregar_feed_xml(url=None, file=None):
+def carregar_feed_xml(file=None, url=None):
+    ns = {"g": "http://base.google.com/ns/1.0"}
     try:
-        ns = {"g": "http://base.google.com/ns/1.0"}
         if file:
             tree = ET.parse(file)
             root = tree.getroot()
-        else:
+        elif url:
             response = requests.get(url)
             response.raise_for_status()
             root = ET.fromstring(response.content)
+        else:
+            return pd.DataFrame(columns=["SKU","Descrição","Valor à Prazo","Valor à Vista"])
+
         items = []
         for item in root.findall(".//item"):
             sku_elem = item.find("g:id", ns)
@@ -112,21 +114,21 @@ def carregar_feed_xml(url=None, file=None):
         return pd.DataFrame(columns=["SKU","Descrição","Valor à Prazo","Valor à Vista"])
 
 # ==========================
-# Upload opcional
+# Upload de arquivos
 # ==========================
 st.sidebar.header("📂 Upload de arquivos")
 feed_file = st.sidebar.file_uploader("Feed XML (GoogleShopping_full.xml)", type=["xml"])
 ipi_upload = st.sidebar.file_uploader("Planilha IPI Itens.xlsx", type=["xlsx"])
 tipi_upload = st.sidebar.file_uploader("TIPI.xlsx", type=["xlsx"])
 
-# Carregar feed
+# Feed
 if feed_file:
     df_feed = carregar_feed_xml(file=feed_file)
 else:
     feed_url = "https://www.hfmultiferramentas.com.br/media/feed/GoogleShopping_full.xml"
     df_feed = carregar_feed_xml(url=feed_url)
 
-# Carregar IPI Itens
+# IPI Itens
 if ipi_upload:
     df_ipi = pd.read_excel(ipi_upload, engine="openpyxl")
     df_ipi.columns = [c.strip() for c in df_ipi.columns]
@@ -134,9 +136,8 @@ if ipi_upload:
     df_ipi["IPI %"] = df_ipi["IPI %"].astype(str).str.replace(",", ".").astype(float)
 else:
     df_ipi = pd.DataFrame(columns=["SKU","IPI %"])
-df_ipi["SKU"] = df_ipi["SKU"].astype(str)
 
-# Carregar TIPI
+# TIPI
 df_ncm = carregar_ncm()
 if tipi_upload:
     df_tipi = pd.read_excel(tipi_upload)
@@ -152,7 +153,7 @@ else:
     df_full["IPI"] = "NT"
 
 # ==========================
-# Interface com abas
+# Abas
 # ==========================
 tab1, tab2 = st.tabs(["Consulta NCM/IPI","Calculadora IPI via SKU"])
 
@@ -201,12 +202,11 @@ with tab2:
                 valor_base = item["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item["Valor à Prazo"].values[0]
                 frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
 
-                # 🔹 Buscar IPI: primeiro IPI Itens
+                # Buscar IPI do SKU
                 ipi_item = df_ipi[df_ipi["SKU"] == sku_clean]
                 if not ipi_item.empty:
                     ipi_percentual = float(ipi_item["IPI %"].values[0])
                 else:
-                    # 🔹 Buscar TIPI via NCM informado
                     ipi_percentual = 0
                     if ncm_input:
                         ncm_pad = padronizar_codigo(ncm_input)
