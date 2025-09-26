@@ -87,34 +87,33 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
     if not os.path.exists(caminho_xml):
         return None, "Arquivo XML não encontrado."
     
-    tree = ET.parse(caminho_xml)
-    root = tree.getroot()
-    
-    # Namespace padrão do Google Shopping
-    ns = {'g': 'http://base.google.com/ns/1.0'}
-    
-    for item in root.findall('item'):
-        g_id = item.find('g:id', ns)
-        if g_id is not None and g_id.text.strip() == str(sku):
-            titulo = item.find('title', ns).text if item.find('title', ns) is not None else ""
-            link = item.find('link', ns).text if item.find('link', ns) is not None else ""
-            preco_prazo = item.find('g:price', ns).text if item.find('g:price', ns) is not None else ""
-            preco_vista = item.find('g:sale_price', ns).text if item.find('g:sale_price', ns) is not None else ""
-            descricao = item.find('description', ns).text if item.find('description', ns) is not None else ""
-            
-            # Conversão para float
-            preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
-            preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
-            
-            return {
-                "SKU": sku,
-                "Título": titulo,
-                "Link": link,
-                "Valor à Prazo": preco_prazo_val,
-                "Valor à Vista": preco_vista_val,
-                "Descrição": descricao
-            }, None
-    return None, "SKU não encontrado no XML."
+    try:
+        tree = ET.parse(caminho_xml)
+        root = tree.getroot()
+        ns = {'g': 'http://base.google.com/ns/1.0'}
+        for item in root.findall('item'):
+            g_id = item.find('g:id', ns)
+            if g_id is not None and g_id.text.strip() == str(sku):
+                titulo = item.find('title', ns).text if item.find('title', ns) is not None else ""
+                link = item.find('link', ns).text if item.find('link', ns) is not None else ""
+                preco_prazo = item.find('g:price', ns).text if item.find('g:price', ns) is not None else ""
+                preco_vista = item.find('g:sale_price', ns).text if item.find('g:sale_price', ns) is not None else ""
+                descricao = item.find('description', ns).text if item.find('description', ns) is not None else ""
+                
+                preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
+                preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
+                
+                return {
+                    "SKU": sku,
+                    "Título": titulo,
+                    "Link": link,
+                    "Valor à Prazo": preco_prazo_val,
+                    "Valor à Vista": preco_vista_val,
+                    "Descrição": descricao
+                }, None
+        return None, "SKU não encontrado no XML."
+    except ET.ParseError:
+        return None, "Erro ao ler o XML."
 
 # ==========================
 # --- Funções da Calculadora de IPI ---
@@ -198,8 +197,9 @@ with tab2:
                     # Buscar IPI no NCM/IPI
                     ipi_val = df_full[df_full['codigo'] == padronizar_codigo(sku_input)]
                     ipi_percentual = float(ipi_val['IPI'].values[0]) if not ipi_val.empty and ipi_val['IPI'].values[0] != "NT" else 0
-                    
+
                     resultado = calcular_preco_final_xml(item_info, ipi_percentual, valor_final_desejado, frete_valor)
                     st.success("✅ Cálculo realizado com sucesso!")
                     st.table(pd.DataFrame([resultado]))
-
+            except ValueError:
+                st.error("Valores inválidos. Use apenas números para valor e frete.")
