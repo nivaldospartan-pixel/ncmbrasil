@@ -83,10 +83,11 @@ def carregar_tipi(caminho="tipi.xlsx"):
         return pd.DataFrame(columns=["codigo", "IPI"])
 
 # ==========================
-# Funções Feed XML
+# Funções Feed XML com namespace
 # ==========================
 def carregar_feed_xml(url=None, file=None):
     try:
+        ns = {"g": "http://base.google.com/ns/1.0"}
         if file:
             tree = ET.parse(file)
             root = tree.getroot()
@@ -96,14 +97,13 @@ def carregar_feed_xml(url=None, file=None):
             root = ET.fromstring(response.content)
         items = []
         for item in root.findall(".//item"):
-            sku = item.find("g:id").text if item.find("g:id") is not None else ""
-            sku = sku.strip()
-            descricao = item.find("title").text if item.find("title") is not None else ""
-            descricao = descricao.strip()
-            preco_prazo = item.find("g:price").text if item.find("g:price") is not None else "0"
-            preco_vista = item.find("g:sale_price").text if item.find("g:sale_price") is not None else preco_prazo
-            preco_prazo = float(preco_prazo.replace("BRL","").replace(",",".").strip())
-            preco_vista = float(preco_vista.replace("BRL","").replace(",",".").strip())
+            sku_elem = item.find("g:id", ns)
+            sku = sku_elem.text.strip() if sku_elem is not None else ""
+            descricao = item.find("title").text.strip() if item.find("title") is not None else ""
+            preco_prazo_elem = item.find("g:price", ns)
+            preco_vista_elem = item.find("g:sale_price", ns)
+            preco_prazo = float(preco_prazo_elem.text.replace("BRL","").replace(",",".").strip()) if preco_prazo_elem is not None else 0
+            preco_vista = float(preco_vista_elem.text.replace("BRL","").replace(",",".").strip()) if preco_vista_elem is not None else preco_prazo
             items.append({
                 "SKU": str(sku),
                 "Descrição": descricao,
@@ -131,7 +131,7 @@ df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
 df_full["IPI"] = df_full["IPI"].fillna("NT")
 
 # ==========================
-# Upload de feed XML opcional
+# Upload de arquivos
 # ==========================
 st.sidebar.header("📂 Upload de arquivos")
 feed_file = st.sidebar.file_uploader("Carregue o feed XML (GoogleShopping_full.xml)", type=["xml"])
