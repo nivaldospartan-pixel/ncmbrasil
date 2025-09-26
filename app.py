@@ -26,9 +26,13 @@ def padronizar_codigo(codigo):
     codigo = codigo[:8].zfill(8)
     return codigo
 
-def calcular_preco(valor_base, ipi_percentual, frete=0):
-    ipi_valor = (valor_base + frete) * (ipi_percentual / 100)
-    valor_final = valor_base + frete + ipi_valor
+def calcular_ipi_valor(valor_final_desejado, ipi_percentual, frete=0):
+    """Cálculo baseado no valor final desejado (com IPI)"""
+    ipi_frac = ipi_percentual / 100
+    valor_base = valor_final_desejado / (1 + ipi_frac)
+    valor_total = valor_base + frete
+    ipi_valor = valor_total * ipi_frac
+    valor_final = valor_total + ipi_valor
     return round(valor_base,2), round(ipi_valor,2), round(valor_final,2)
 
 # ==========================
@@ -59,16 +63,17 @@ def buscar_por_descricao(df, termo, limite=10):
 # Carregar arquivos
 # ==========================
 def carregar_ncm(caminho="ncm_todos.csv"):
-    if caminho and caminho.endswith(".csv"):
+    try:
         df = pd.read_csv(caminho, dtype=str)
         df.rename(columns={df.columns[0]: "codigo", df.columns[1]: "descricao"}, inplace=True)
         df["codigo"] = df["codigo"].apply(padronizar_codigo)
         df["descricao"] = df["descricao"].astype(str)
         return df
-    return pd.DataFrame(columns=["codigo","descricao"])
+    except:
+        return pd.DataFrame(columns=["codigo","descricao"])
 
 def carregar_tipi(caminho="TIPI.xlsx"):
-    if caminho:
+    try:
         df = pd.read_excel(caminho, dtype=str)
         df.columns = [unidecode.unidecode(c.strip().lower()) for c in df.columns]
         if "ncm" in df.columns and "aliquota (%)" in df.columns:
@@ -77,6 +82,8 @@ def carregar_tipi(caminho="TIPI.xlsx"):
             df["codigo"] = df["codigo"].apply(padronizar_codigo)
             df["IPI"] = df["IPI"].fillna("NT")
             return df
+    except:
+        pass
     return pd.DataFrame(columns=["codigo","IPI"])
 
 def carregar_feed_xml(file=None, url=None):
@@ -189,17 +196,17 @@ with tab2:
     tipo_valor = st.radio("Escolha o tipo de valor:", ["À Vista","À Prazo"])
     frete_checkbox = st.checkbox("Adicionar frete?")
     frete_input = st.text_input("Valor do frete:", value="0.00") if frete_checkbox else "0.00"
+    valor_final_desejado = st.text_input("Valor final desejado (com IPI):", value="0.00")
 
     if st.button("Calcular Preço"):
-        if not sku_input:
-            st.warning("Informe o SKU do produto.")
+        if not sku_input or float(valor_final_desejado.replace(",",".")) <= 0:
+            st.warning("Informe o SKU e o valor final desejado corretamente.")
         else:
             sku_clean = sku_input.strip()
             item = df_feed[df_feed["SKU"] == sku_clean]
             if item.empty:
                 st.error("SKU não encontrado no feed.")
             else:
-                valor_base = item["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item["Valor à Prazo"].values[0]
                 frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
 
                 # Buscar IPI do SKU
@@ -214,7 +221,7 @@ with tab2:
                         if not ipi_tipi.empty and ipi_tipi["IPI"].values[0] != "NT":
                             ipi_percentual = float(ipi_tipi["IPI"].values[0])
 
-                base, ipi_valor, valor_final = calcular_preco(valor_base, ipi_percentual, frete_valor)
+                base, ipi_valor, valor_final = calcular_ipi_valor(float(valor_final_desejado.replace(",", ".")), ipi_percentual, frete_valor)
 
                 st.success(f"✅ Cálculo realizado para SKU {sku_clean}")
                 st.table({
