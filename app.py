@@ -4,14 +4,12 @@ import unidecode
 import re
 import xml.etree.ElementTree as ET
 import requests
-from rapidfuzz import process, fuzz
 
 # ==========================
 # Configuração da página
 # ==========================
-st.set_page_config(page_title="Sistema Integrado NCM/IPI", layout="wide")
-st.title("💻 Sistema Integrado NCM/IPI")
-st.markdown("Consulta NCM e cálculo automático de IPI usando feed XML, TIPI e planilha de SKUs.")
+st.set_page_config(page_title="Sistema Completo NCM/IPI", layout="wide")
+st.title("💻 Sistema Completo de Consulta NCM e Calculadora de IPI")
 
 # ==========================
 # Funções utilitárias
@@ -32,6 +30,9 @@ def calcular_ipi_valor(valor_produto, ipi_percentual, frete=0):
     valor_final = valor_base + frete + ipi_valor
     return round(valor_base,2), round(ipi_valor,2), round(valor_final,2)
 
+# ==========================
+# Carregar feed XML (ML)
+# ==========================
 def carregar_feed_xml(file=None, url=None):
     ns = {"g": "http://base.google.com/ns/1.0"}
     try:
@@ -66,12 +67,12 @@ def carregar_feed_xml(file=None, url=None):
     except:
         return pd.DataFrame(columns=["SKU","Descrição","Valor à Prazo","Valor à Vista"])
 
+# ==========================
+# Carregar TIPI
+# ==========================
 def carregar_tipi(file=None):
     try:
-        if file:
-            df = pd.read_excel(file)
-        else:
-            df = pd.read_excel("TIPI.xlsx")
+        df = pd.read_excel(file) if file else pd.read_excel("TIPI.xlsx")
         df.columns = [unidecode.unidecode(c.strip().lower()) for c in df.columns]
         df = df[["ncm","aliquota (%)"]].copy()
         df.rename(columns={"ncm":"codigo","aliquota (%)":"IPI"}, inplace=True)
@@ -81,12 +82,12 @@ def carregar_tipi(file=None):
     except:
         return pd.DataFrame(columns=["codigo","IPI"])
 
+# ==========================
+# Carregar IPI Itens
+# ==========================
 def carregar_ipi_itens(file=None):
     try:
-        if file:
-            df = pd.read_excel(file)
-        else:
-            df = pd.read_excel("IPI Itens.xlsx")
+        df = pd.read_excel(file) if file else pd.read_excel("IPI Itens.xlsx")
         df.columns = [c.strip() for c in df.columns]
         df["SKU"] = df["SKU"].astype(str).str.strip()
         df["NCM"] = df["NCM"].apply(padronizar_codigo)
@@ -94,32 +95,23 @@ def carregar_ipi_itens(file=None):
     except:
         return pd.DataFrame(columns=["SKU","Descrição","NCM","Valor à Prazo","Valor à Vista"])
 
-def buscar_por_codigo(df, codigo):
-    codigo = padronizar_codigo(codigo)
-    resultado = df[df["codigo"] == codigo]
-    if not resultado.empty:
-        return resultado.iloc[0].to_dict()
-    return {"erro": f"NCM {codigo} não encontrado"}
-
-def buscar_por_descricao(df, termo, limite=10):
-    termo_norm = normalizar(termo)
-    descricoes_norm = df["descricao"].apply(normalizar)
-    escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=limite)
-    resultados = []
-    for desc, score, idx in escolhas:
-        resultados.append({
-            "codigo": df.loc[idx, "codigo"],
-            "descricao": df.loc[idx, "descricao"],
-            "IPI": df.loc[idx, "IPI"] if "IPI" in df.columns else "NT",
-            "similaridade": round(score,2)
-        })
-    return resultados
+# ==========================
+# Carregar NCM
+# ==========================
+def carregar_ncm(file=None):
+    try:
+        df = pd.read_csv(file) if file else pd.read_csv("NCM.csv", dtype=str)
+        df.columns = [c.strip() for c in df.columns]
+        df["codigo"] = df["codigo"].apply(padronizar_codigo)
+        return df
+    except:
+        return pd.DataFrame(columns=["codigo","descricao"])
 
 # ==========================
 # Uploads opcionais
 # ==========================
 st.sidebar.header("📂 Upload de arquivos")
-feed_file = st.sidebar.file_uploader("Feed XML (GoogleShopping_full.xml)", type=["xml"])
+feed_file = st.sidebar.file_uploader("Feed XML (ML)", type=["xml"])
 tipi_upload = st.sidebar.file_uploader("TIPI.xlsx", type=["xlsx"])
 ipi_upload = st.sidebar.file_uploader("IPI Itens.xlsx", type=["xlsx"])
 ncm_upload = st.sidebar.file_uploader("NCM.csv", type=["csv"])
@@ -128,9 +120,7 @@ ncm_upload = st.sidebar.file_uploader("NCM.csv", type=["csv"])
 df_feed = carregar_feed_xml(file=feed_file) if feed_file else carregar_feed_xml(url="https://www.hfmultiferramentas.com.br/media/feed/GoogleShopping_full.xml")
 df_tipi = carregar_tipi(file=tipi_upload)
 df_ipi_itens = carregar_ipi_itens(file=ipi_upload)
-df_ncm = pd.read_csv(ncm_upload, dtype=str) if ncm_upload else pd.DataFrame(columns=["codigo","descricao"])
-if not df_ncm.empty:
-    df_ncm["codigo"] = df_ncm["codigo"].apply(padronizar_codigo)
+df_ncm = carregar_ncm(file=ncm_upload)
 
 # ==========================
 # Consulta NCM
@@ -140,13 +130,15 @@ opcao_consulta = st.radio("Escolha a forma de consulta:", ["Por código","Por de
 if opcao_consulta == "Por código":
     codigo_ncm = st.text_input("Digite o código NCM (ex: 84248990)")
     if codigo_ncm:
-        resultado = buscar_por_codigo(df_ncm, codigo_ncm)
-        st.json(resultado)
+        resultado = df_ncm[df_ncm["codigo"]==padronizar_codigo(codigo_ncm)]
+        st.json(resultado.to_dict(orient="records") if not resultado.empty else {"erro":"Código NCM não encontrado"})
 else:
     termo = st.text_input("Digite parte da descrição")
     if termo:
-        resultados = buscar_por_descricao(df_ncm, termo)
-        st.dataframe(pd.DataFrame(resultados))
+        termo_norm = normalizar(termo)
+        descricoes_norm = df_ncm["descricao"].apply(normalizar)
+        df_ncm["similaridade"] = df_ncm["descricao"].apply(lambda x: fuzz.WRatio(normalizar(x), termo_norm))
+        st.dataframe(df_ncm.sort_values("similaridade", ascending=False).head(10))
 
 # ==========================
 # Calculadora IPI
@@ -162,28 +154,19 @@ if st.button("Calcular Preço"):
         st.warning("Digite o SKU")
     else:
         sku_clean = sku_input.strip()
-        # Buscar item no feed
-        item_feed = df_feed[df_feed["SKU"] == sku_clean]
+        item_feed = df_feed[df_feed["SKU"]==sku_clean]
         if item_feed.empty:
             st.error("SKU não encontrado no feed.")
         else:
-            # Selecionar valor do produto
             valor_produto = item_feed["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item_feed["Valor à Prazo"].values[0]
-
-            # Buscar NCM do SKU
             sku_info = df_ipi_itens[df_ipi_itens["SKU"]==sku_clean]
             if sku_info.empty:
                 st.error("SKU não possui NCM cadastrado na planilha IPI Itens.")
             else:
                 ncm_pad = sku_info["NCM"].values[0]
-                # Buscar IPI na TIPI pelo NCM
                 ipi_tipi = df_tipi[df_tipi["codigo"]==ncm_pad]
                 ipi_percentual = float(ipi_tipi["IPI"].values[0]) if not ipi_tipi.empty else 0
-                
-                # Calcular valores
                 base, ipi_valor, valor_final = calcular_ipi_valor(valor_produto, ipi_percentual, frete_valor)
-                
-                # Exibir resultados
                 st.success(f"✅ Cálculo realizado para SKU {sku_clean}")
                 st.table({
                     "SKU":[sku_clean],
