@@ -92,16 +92,33 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
         root = tree.getroot()
         
         # Percorre todos os items
-        for item in root.findall('.//item'):
-            # Encontra o id, independentemente do namespace
-            g_id = item.find('.//*[local-name()="id"]')
-            if g_id is not None and g_id.text.strip() == str(sku):
-                titulo = item.find('.//*[local-name()="title"]').text if item.find('.//*[local-name()="title"]') is not None else ""
-                link = item.find('.//*[local-name()="link"]').text if item.find('.//*[local-name()="link"]') is not None else ""
-                preco_prazo = item.find('.//*[local-name()="price"]').text if item.find('.//*[local-name()="price"]') is not None else ""
-                preco_vista = item.find('.//*[local-name()="sale_price"]').text if item.find('.//*[local-name()="sale_price"]') is not None else ""
-                descricao = item.find('.//*[local-name()="description"]').text if item.find('.//*[local-name()="description"]') is not None else ""
+        for item in root.findall('item'):
+            g_id = None
+            titulo = ""
+            link = ""
+            preco_prazo = ""
+            preco_vista = ""
+            descricao = ""
+            
+            # Percorre todos os filhos do item
+            for child in item:
+                tag = child.tag.split("}")[-1]  # ignora namespace
+                text = child.text.strip() if child.text else ""
                 
+                if tag == "id":
+                    g_id = text
+                elif tag == "title":
+                    titulo = text
+                elif tag == "link":
+                    link = text
+                elif tag == "price":
+                    preco_prazo = text
+                elif tag == "sale_price":
+                    preco_vista = text
+                elif tag == "description":
+                    descricao = text
+            
+            if g_id == str(sku):
                 preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
                 preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
                 
@@ -113,6 +130,7 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
                     "Valor à Vista": preco_vista_val,
                     "Descrição": descricao
                 }, None
+        
         return None, "SKU não encontrado no XML."
     except ET.ParseError:
         return None, "Erro ao ler o XML."
