@@ -164,7 +164,9 @@ else:
 # ==========================
 tab1, tab2 = st.tabs(["Consulta NCM/IPI","Calculadora IPI via SKU"])
 
-# --- Aba 1: Consulta NCM/IPI ---
+# ==========================
+# Aba 1: Consulta NCM/IPI
+# ==========================
 with tab1:
     st.header("🔍 Consulta de NCM/IPI")
     opcao = st.radio("Escolha o tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
@@ -188,7 +190,9 @@ with tab1:
             else:
                 st.warning("⚠️ Nenhum resultado encontrado.")
 
-# --- Aba 2: Calculadora de IPI via SKU ---
+# ==========================
+# Aba 2: Calculadora IPI via SKU
+# ==========================
 with tab2:
     st.header("🧾 Calculadora de IPI via SKU")
     sku_input = st.text_input("Digite o SKU do produto:")
