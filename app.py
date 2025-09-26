@@ -40,7 +40,8 @@ def carregar_tipi(caminho="tipi.xlsx"):
             df = df[["ncm","aliquota (%)"]].copy()
             df.rename(columns={"ncm":"codigo","aliquota (%)":"IPI"}, inplace=True)
             df["codigo"] = df["codigo"].apply(padronizar_codigo)
-            df["IPI"] = df["IPI"].fillna(0).astype(float)
+            # Corrigir valores inválidos
+            df["IPI"] = pd.to_numeric(df["IPI"].str.replace(",", ".").str.strip(), errors="coerce").fillna(0)
             return df
     return pd.DataFrame(columns=["codigo", "IPI"])
 
@@ -48,9 +49,9 @@ def carregar_ipi_itens(caminho="IPI Itens.xlsx"):
     if os.path.exists(caminho):
         df = pd.read_excel(caminho, engine="openpyxl")
         df["SKU"] = df["SKU"].astype(str).str.strip().str.zfill(5)
-        df["Valor à Prazo"] = df["Valor à Prazo"].astype(str).str.replace(",", ".").astype(float)
-        df["Valor à Vista"] = df["Valor à Vista"].astype(str).str.replace(",", ".").astype(float)
-        df["IPI %"] = df["IPI %"].astype(str).str.replace(",", ".").astype(float)
+        df["Valor à Prazo"] = pd.to_numeric(df["Valor à Prazo"].astype(str).str.replace(",", "."), errors="coerce").fillna(0)
+        df["Valor à Vista"] = pd.to_numeric(df["Valor à Vista"].astype(str).str.replace(",", "."), errors="coerce").fillna(0)
+        df["IPI %"] = pd.to_numeric(df["IPI %"].astype(str).str.replace(",", "."), errors="coerce").fillna(0)
         df["NCM"] = df["NCM"].apply(padronizar_codigo)
         return df
     return pd.DataFrame(columns=["SKU","Descrição Item","Valor à Prazo","Valor à Vista","IPI %","NCM"])
@@ -72,31 +73,6 @@ def carregar_feed_xml(caminho="GoogleShopping_full.xml"):
         df = pd.DataFrame(items)
         return df
     return pd.DataFrame(columns=["SKU","Descrição","Valor à Prazo","Valor à Vista"])
-
-# ==========================
-# Funções de NCM
-# ==========================
-def buscar_por_codigo(df, codigo):
-    codigo = padronizar_codigo(codigo)
-    resultado = df[df["codigo"]==codigo]
-    if not resultado.empty:
-        return resultado.to_dict(orient="records")
-    return {"erro": f"NCM {codigo} não encontrado"}
-
-def buscar_por_descricao(df, termo, limite=10):
-    termo_norm = normalizar(termo)
-    descricoes_norm = df["descricao"].apply(normalizar)
-    from rapidfuzz import process, fuzz
-    escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=limite)
-    resultados = []
-    for desc, score, idx in escolhas:
-        resultados.append({
-            "codigo": df.loc[idx,"codigo"],
-            "descricao": df.loc[idx,"descricao"],
-            "IPI": df.loc[idx,"IPI"] if "IPI" in df.columns else "NT",
-            "similaridade": round(score,2)
-        })
-    return resultados
 
 # ==========================
 # Função Calculadora de IPI
@@ -130,19 +106,27 @@ with tab1:
     if tipo_busca=="Por Código":
         codigo = st.text_input("Digite o código NCM")
         if codigo:
-            resultado = buscar_por_codigo(df_full, codigo)
-            if "erro" in resultado:
-                st.warning(resultado["erro"])
+            resultado = df_full[df_full["codigo"]==padronizar_codigo(codigo)]
+            if resultado.empty:
+                st.warning(f"NCM {codigo} não encontrado")
             else:
-                st.dataframe(pd.DataFrame(resultado))
+                st.dataframe(resultado)
     else:
         termo = st.text_input("Digite parte da descrição")
         if termo:
-            resultados = buscar_por_descricao(df_full, termo)
-            if resultados:
-                st.dataframe(pd.DataFrame(resultados))
-            else:
-                st.warning("Nenhum resultado encontrado.")
+            from rapidfuzz import process, fuzz
+            termo_norm = normalizar(termo)
+            descricoes_norm = df_full["descricao"].apply(normalizar)
+            escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=10)
+            resultados = []
+            for desc, score, idx in escolhas:
+                resultados.append({
+                    "codigo": df_full.loc[idx,"codigo"],
+                    "descricao": df_full.loc[idx,"descricao"],
+                    "IPI": df_full.loc[idx,"IPI"],
+                    "similaridade": round(score,2)
+                })
+            st.dataframe(pd.DataFrame(resultados))
 
 with tab2:
     st.header("🧾 Calculadora de IPI")
