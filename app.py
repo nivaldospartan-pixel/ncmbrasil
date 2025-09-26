@@ -29,24 +29,28 @@ def calcular_ipi_valor(valor_produto, ipi_percentual, frete=0):
     return round(valor_base,2), round(ipi_valor,2), round(valor_final,2)
 
 # ==========================
-# Funções de carregamento
+# Carregamento das bases
 # ==========================
 def carregar_feed_xml(xml_file):
-    tree = ET.parse(xml_file)
-    root = tree.getroot()
-    items = []
-    for item in root.findall(".//item"):
-        sku_elem = item.find("g:id", {"g":"http://base.google.com/ns/1.0"})
-        sku = sku_elem.text.strip() if sku_elem is not None else ""
-        descricao = item.find("title").text.strip() if item.find("title") is not None else ""
-        preco_prazo_elem = item.find("g:price", {"g":"http://base.google.com/ns/1.0"})
-        preco_vista_elem = item.find("g:sale_price", {"g":"http://base.google.com/ns/1.0"})
-        preco_prazo = float(preco_prazo_elem.text.replace("BRL","").replace(",",".").strip()) if preco_prazo_elem is not None else 0
-        preco_vista = float(preco_vista_elem.text.replace("BRL","").replace(",",".").strip()) if preco_vista_elem is not None else preco_prazo
-        items.append({"SKU": str(sku), "Descrição": descricao, "Valor à Prazo": preco_prazo, "Valor à Vista": preco_vista})
-    df = pd.DataFrame(items)
-    df["SKU"] = df["SKU"].astype(str)
-    return df
+    try:
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+        items = []
+        for item in root.findall(".//item"):
+            sku_elem = item.find("g:id", {"g":"http://base.google.com/ns/1.0"})
+            sku = sku_elem.text.strip() if sku_elem is not None else ""
+            descricao = item.find("title").text.strip() if item.find("title") is not None else ""
+            preco_prazo_elem = item.find("g:price", {"g":"http://base.google.com/ns/1.0"})
+            preco_vista_elem = item.find("g:sale_price", {"g":"http://base.google.com/ns/1.0"})
+            preco_prazo = float(preco_prazo_elem.text.replace("BRL","").replace(",",".").strip()) if preco_prazo_elem is not None else 0
+            preco_vista = float(preco_vista_elem.text.replace("BRL","").replace(",",".").strip()) if preco_vista_elem is not None else preco_prazo
+            items.append({"SKU": str(sku), "Descrição": descricao, "Valor à Prazo": preco_prazo, "Valor à Vista": preco_vista})
+        df = pd.DataFrame(items)
+        df["SKU"] = df["SKU"].astype(str)
+        return df
+    except Exception as e:
+        st.error(f"Erro ao carregar Feed XML: {e}")
+        return pd.DataFrame()
 
 def carregar_tipi(xlsx_file):
     df = pd.read_excel(xlsx_file)
@@ -71,7 +75,7 @@ def carregar_ncm(csv_file):
     return df
 
 # ==========================
-# Funções de busca NCM
+# Busca NCM
 # ==========================
 def buscar_ncm_por_codigo(df, codigo):
     codigo = padronizar_codigo(codigo)
@@ -100,11 +104,21 @@ tipi_file = st.sidebar.file_uploader("Upload TIPI.xlsx", type=["xlsx"])
 ipi_file = st.sidebar.file_uploader("Upload IPI Itens.xlsx", type=["xlsx"])
 ncm_file = st.sidebar.file_uploader("Upload NCM.csv", type=["csv"])
 
-if feed_file and tipi_file and ipi_file and ncm_file:
+# ==========================
+# Inicialização das bases
+# ==========================
+df_feed, df_tipi, df_ipi_itens, df_ncm = None, None, None, None
+
+if feed_file:
     df_feed = carregar_feed_xml(feed_file)
+if tipi_file:
     df_tipi = carregar_tipi(tipi_file)
+if ipi_file:
     df_ipi_itens = carregar_ipi_itens(ipi_file)
+if ncm_file:
     df_ncm = carregar_ncm(ncm_file)
+
+if df_feed is not None and df_tipi is not None and df_ipi_itens is not None and df_ncm is not None:
     st.success("✅ Bases carregadas com sucesso!")
 
     # ==========================
@@ -154,17 +168,24 @@ if feed_file and tipi_file and ipi_file and ncm_file:
             else:
                 ncm_pad = sku_info["NCM"].values[0]
                 ipi_tipi = df_tipi[df_tipi["codigo"]==ncm_pad]
-                ipi_percentual = float(ipi_tipi["IPI"].values[0]) if not ipi_tipi.empty else 0
+                if ipi_tipi.empty:
+                    st.warning(f"⚠️ NCM {ncm_pad} não encontrado na TIPI. IPI será considerado 0%")
+                    ipi_percentual = 0
+                else:
+                    ipi_percentual = float(ipi_tipi["IPI"].values[0])
                 valor_base, ipi_valor, valor_final = calcular_ipi_valor(valor_produto, ipi_percentual, frete_valor)
+
+                df_resultado = pd.DataFrame([{
+                    "SKU": sku_input,
+                    "Descrição": item_feed["Descrição"].values[0],
+                    "Valor Base": valor_base,
+                    "Frete": frete_valor,
+                    "IPI": ipi_valor,
+                    "Valor Final": valor_final,
+                    "IPI %": ipi_percentual
+                }])
                 st.success("✅ Cálculo realizado!")
-                st.table({
-                    "SKU":[sku_input],
-                    "Descrição":[item_feed["Descrição"].values[0]],
-                    "Valor Base":[valor_base],
-                    "Frete":[frete_valor],
-                    "IPI":[ipi_valor],
-                    "Valor Final":[valor_final],
-                    "IPI %":[ipi_percentual]
-                })
+                st.dataframe(df_resultado)
+
 else:
     st.warning("⏳ Carregue todas as bases para iniciar o sistema.")
