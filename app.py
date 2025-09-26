@@ -4,87 +4,28 @@ import unidecode
 import re
 import xml.etree.ElementTree as ET
 import requests
-from rapidfuzz import process, fuzz
 
 # ==========================
 # Configuração da página
 # ==========================
-st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide")
-st.title("📦 Dashboard NCM & IPI")
-st.markdown("Consulta NCM/IPI e cálculo de preço com IPI incluso")
+st.set_page_config(page_title="Calculadora de IPI Integrada", layout="wide")
+st.title("🧾 Calculadora de IPI via SKU")
+st.markdown("Digite o SKU, selecione a forma de pagamento e informe o frete. O cálculo será feito automaticamente usando o TIPI.")
 
 # ==========================
 # Funções utilitárias
 # ==========================
-def normalizar(texto):
-    texto = unidecode.unidecode(str(texto).lower())
-    texto = re.sub(r"[^a-z0-9\s]", " ", texto)
-    return re.sub(r"\s+", " ", texto)
-
 def padronizar_codigo(codigo):
     codigo = str(codigo).replace(".", "").strip()
     codigo = codigo[:8].zfill(8)
     return codigo
 
-def calcular_ipi_valor(valor_final_desejado, ipi_percentual, frete=0):
-    """Cálculo baseado no valor final desejado (com IPI)"""
+def calcular_ipi_valor(valor_produto, ipi_percentual, frete=0):
     ipi_frac = ipi_percentual / 100
-    valor_base = valor_final_desejado / (1 + ipi_frac)
-    valor_total = valor_base + frete
-    ipi_valor = valor_total * ipi_frac
-    valor_final = valor_total + ipi_valor
+    valor_base = valor_produto
+    ipi_valor = (valor_base + frete) * ipi_frac
+    valor_final = valor_base + frete + ipi_valor
     return round(valor_base,2), round(ipi_valor,2), round(valor_final,2)
-
-# ==========================
-# Consulta NCM
-# ==========================
-def buscar_por_codigo(df, codigo):
-    codigo = padronizar_codigo(codigo)
-    resultado = df[df["codigo"] == codigo]
-    if not resultado.empty:
-        return resultado.to_dict(orient="records")
-    return {"erro": f"NCM {codigo} não encontrado"}
-
-def buscar_por_descricao(df, termo, limite=10):
-    termo_norm = normalizar(termo)
-    descricoes_norm = df["descricao"].apply(normalizar)
-    escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=limite)
-    resultados = []
-    for desc, score, idx in escolhas:
-        resultados.append({
-            "codigo": df.loc[idx, "codigo"],
-            "descricao": df.loc[idx, "descricao"],
-            "IPI": df.loc[idx, "IPI"] if "IPI" in df.columns else "NT",
-            "similaridade": round(score, 2)
-        })
-    return resultados
-
-# ==========================
-# Carregar arquivos
-# ==========================
-def carregar_ncm(caminho="ncm_todos.csv"):
-    try:
-        df = pd.read_csv(caminho, dtype=str)
-        df.rename(columns={df.columns[0]: "codigo", df.columns[1]: "descricao"}, inplace=True)
-        df["codigo"] = df["codigo"].apply(padronizar_codigo)
-        df["descricao"] = df["descricao"].astype(str)
-        return df
-    except:
-        return pd.DataFrame(columns=["codigo","descricao"])
-
-def carregar_tipi(caminho="TIPI.xlsx"):
-    try:
-        df = pd.read_excel(caminho, dtype=str)
-        df.columns = [unidecode.unidecode(c.strip().lower()) for c in df.columns]
-        if "ncm" in df.columns and "aliquota (%)" in df.columns:
-            df = df[["ncm","aliquota (%)"]].copy()
-            df.rename(columns={"ncm":"codigo","aliquota (%)":"IPI"}, inplace=True)
-            df["codigo"] = df["codigo"].apply(padronizar_codigo)
-            df["IPI"] = df["IPI"].fillna("NT")
-            return df
-    except:
-        pass
-    return pd.DataFrame(columns=["codigo","IPI"])
 
 def carregar_feed_xml(file=None, url=None):
     ns = {"g": "http://base.google.com/ns/1.0"}
@@ -120,120 +61,81 @@ def carregar_feed_xml(file=None, url=None):
     except:
         return pd.DataFrame(columns=["SKU","Descrição","Valor à Prazo","Valor à Vista"])
 
+def carregar_tipi(file=None):
+    try:
+        if file:
+            df = pd.read_excel(file)
+        else:
+            df = pd.read_excel("TIPI.xlsx")
+        df.columns = [unidecode.unidecode(c.strip().lower()) for c in df.columns]
+        df = df[["ncm","aliquota (%)"]].copy()
+        df.rename(columns={"ncm":"codigo","aliquota (%)":"IPI"}, inplace=True)
+        df["codigo"] = df["codigo"].apply(padronizar_codigo)
+        df["IPI"] = df["IPI"].fillna(0).astype(float)
+        return df
+    except:
+        return pd.DataFrame(columns=["codigo","IPI"])
+
 # ==========================
-# Upload de arquivos
+# Upload opcional
 # ==========================
-st.sidebar.header("📂 Upload de arquivos")
+st.sidebar.header("📂 Upload de arquivos (opcional)")
 feed_file = st.sidebar.file_uploader("Feed XML (GoogleShopping_full.xml)", type=["xml"])
-ipi_upload = st.sidebar.file_uploader("Planilha IPI Itens.xlsx", type=["xlsx"])
 tipi_upload = st.sidebar.file_uploader("TIPI.xlsx", type=["xlsx"])
 
-# Feed
+# Carregar feed
 if feed_file:
     df_feed = carregar_feed_xml(file=feed_file)
 else:
     feed_url = "https://www.hfmultiferramentas.com.br/media/feed/GoogleShopping_full.xml"
     df_feed = carregar_feed_xml(url=feed_url)
 
-# IPI Itens
-if ipi_upload:
-    df_ipi = pd.read_excel(ipi_upload, engine="openpyxl")
-    df_ipi.columns = [c.strip() for c in df_ipi.columns]
-    df_ipi["SKU"] = df_ipi["SKU"].astype(str).str.strip()
-    df_ipi["IPI %"] = df_ipi["IPI %"].astype(str).str.replace(",", ".").astype(float)
-else:
-    df_ipi = pd.DataFrame(columns=["SKU","IPI %"])
-
-# TIPI
-df_ncm = carregar_ncm()
-if tipi_upload:
-    df_tipi = pd.read_excel(tipi_upload)
-    df_tipi.columns = [unidecode.unidecode(c.strip().lower()) for c in df_tipi.columns]
-    df_tipi = df_tipi[["ncm","aliquota (%)"]].copy()
-    df_tipi.rename(columns={"ncm":"codigo","aliquota (%)":"IPI"}, inplace=True)
-    df_tipi["codigo"] = df_tipi["codigo"].apply(padronizar_codigo)
-    df_tipi["IPI"] = df_tipi["IPI"].fillna("NT")
-    df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
-    df_full["IPI"] = df_full["IPI"].fillna("NT")
-else:
-    df_full = df_ncm.copy()
-    df_full["IPI"] = "NT"
+# Carregar TIPI
+df_tipi = carregar_tipi(file=tipi_upload)
 
 # ==========================
-# Abas
+# Formulário simplificado
 # ==========================
-tab1, tab2 = st.tabs(["Consulta NCM/IPI","Calculadora IPI via SKU"])
+st.subheader("💡 Calculadora de IPI via SKU")
+sku_input = st.text_input("Digite o SKU do produto:")
+tipo_valor = st.radio("Escolha a forma de pagamento:", ["À Vista","À Prazo"])
+frete_checkbox = st.checkbox("Adicionar frete?")
+frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.01) if frete_checkbox else 0.0
 
-# ==========================
-# Aba 1: Consulta NCM/IPI
-# ==========================
-with tab1:
-    st.header("🔍 Consulta de NCM/IPI")
-    opcao = st.radio("Escolha o tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
-    if opcao == "Por código":
-        codigo_input = st.text_input("Digite o código NCM (ex: 8424.89.90)")
-        if codigo_input:
-            resultado = buscar_por_codigo(df_full, codigo_input)
-            if isinstance(resultado, dict) and "erro" in resultado:
-                st.warning(resultado["erro"])
-            else:
-                st.dataframe(pd.DataFrame(resultado).reset_index(drop=True), height=300)
-    elif opcao == "Por descrição":
-        termo_input = st.text_input("Digite parte da descrição do produto")
-        if termo_input:
-            resultados = buscar_por_descricao(df_full, termo_input)
-            if resultados:
-                df_resultados = pd.DataFrame(resultados)
-                df_resultados = df_resultados.sort_values(by="similaridade", ascending=False).reset_index(drop=True)
-                df_resultados["IPI"] = df_resultados["IPI"].apply(lambda x: f"✅ {x}" if x != "NT" else f"❌ {x}")
-                st.dataframe(df_resultados, height=400)
-            else:
-                st.warning("⚠️ Nenhum resultado encontrado.")
-
-# ==========================
-# Aba 2: Calculadora IPI via SKU
-# ==========================
-with tab2:
-    st.header("🧾 Calculadora de IPI via SKU")
-    sku_input = st.text_input("Digite o SKU do produto:")
-    ncm_input = st.text_input("Digite o NCM do produto (opcional, usado se IPI não estiver na planilha):")
-    tipo_valor = st.radio("Escolha o tipo de valor:", ["À Vista","À Prazo"])
-    frete_checkbox = st.checkbox("Adicionar frete?")
-    frete_input = st.text_input("Valor do frete:", value="0.00") if frete_checkbox else "0.00"
-    valor_final_desejado = st.text_input("Valor final desejado (com IPI):", value="0.00")
-
-    if st.button("Calcular Preço"):
-        if not sku_input or float(valor_final_desejado.replace(",",".")) <= 0:
-            st.warning("Informe o SKU e o valor final desejado corretamente.")
+if st.button("Calcular Preço"):
+    if not sku_input:
+        st.warning("Digite o SKU do produto.")
+    else:
+        sku_clean = sku_input.strip()
+        item = df_feed[df_feed["SKU"] == sku_clean]
+        if item.empty:
+            st.error("SKU não encontrado no feed.")
         else:
-            sku_clean = sku_input.strip()
-            item = df_feed[df_feed["SKU"] == sku_clean]
-            if item.empty:
-                st.error("SKU não encontrado no feed.")
+            # Selecionar valor do produto
+            if tipo_valor == "À Vista":
+                valor_produto = item["Valor à Vista"].values[0]
             else:
-                frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
+                valor_produto = item["Valor à Prazo"].values[0]
 
-                # Buscar IPI do SKU
-                ipi_item = df_ipi[df_ipi["SKU"] == sku_clean]
-                if not ipi_item.empty:
-                    ipi_percentual = float(ipi_item["IPI %"].values[0])
-                else:
-                    ipi_percentual = 0
-                    if ncm_input:
-                        ncm_pad = padronizar_codigo(ncm_input)
-                        ipi_tipi = df_full[df_full["codigo"] == ncm_pad]
-                        if not ipi_tipi.empty and ipi_tipi["IPI"].values[0] != "NT":
-                            ipi_percentual = float(ipi_tipi["IPI"].values[0])
+            # Buscar NCM do SKU
+            ncm_pad = ""  # Aqui você pode mapear NCM se tiver em outra base
+            ipi_tipi = df_tipi[df_tipi["codigo"] == ncm_pad]
+            if not ipi_tipi.empty:
+                ipi_percentual = float(ipi_tipi["IPI"].values[0])
+            else:
+                ipi_percentual = 0
 
-                base, ipi_valor, valor_final = calcular_ipi_valor(float(valor_final_desejado.replace(",", ".")), ipi_percentual, frete_valor)
+            # Calcular preços
+            base, ipi_valor, valor_final = calcular_ipi_valor(valor_produto, ipi_percentual, frete_valor)
 
-                st.success(f"✅ Cálculo realizado para SKU {sku_clean}")
-                st.table({
-                    "SKU":[sku_clean],
-                    "Descrição":[item["Descrição"].values[0]],
-                    "Valor Base":[base],
-                    "Frete":[frete_valor],
-                    "IPI":[ipi_valor],
-                    "Valor Final":[valor_final],
-                    "IPI %":[ipi_percentual]
-                })
+            # Exibir resultados
+            st.success(f"✅ Cálculo realizado para SKU {sku_clean}")
+            st.table({
+                "SKU":[sku_clean],
+                "Descrição":[item["Descrição"].values[0]],
+                "Valor Base":[base],
+                "Frete":[frete_valor],
+                "IPI":[ipi_valor],
+                "Valor Final":[valor_final],
+                "IPI %":[ipi_percentual]
+            })
