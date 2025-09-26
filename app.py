@@ -5,6 +5,7 @@ import re
 import xml.etree.ElementTree as ET
 import requests
 import os
+from rapidfuzz import process, fuzz
 
 # ==========================
 # Configuração da página
@@ -44,7 +45,6 @@ def buscar_por_codigo(df, codigo):
 def buscar_por_descricao(df, termo, limite=10):
     termo_norm = normalizar(termo)
     descricoes_norm = df["descricao"].apply(normalizar)
-    from rapidfuzz import process, fuzz
     escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=limite)
     resultados = []
     for desc, score, idx in escolhas:
@@ -57,7 +57,7 @@ def buscar_por_descricao(df, termo, limite=10):
     return resultados
 
 # ==========================
-# Carregar TIPI.xlsx, NCM e IPI Itens
+# Carregar arquivos
 # ==========================
 def carregar_ncm(caminho="ncm_todos.csv"):
     if os.path.exists(caminho):
@@ -80,9 +80,6 @@ def carregar_tipi(caminho="tipi.xlsx"):
             return df
     return pd.DataFrame(columns=["codigo","IPI"])
 
-# ==========================
-# Carregar feed XML
-# ==========================
 def carregar_feed_xml(url=None, file=None):
     try:
         ns = {"g": "http://base.google.com/ns/1.0"}
@@ -115,7 +112,7 @@ def carregar_feed_xml(url=None, file=None):
         return pd.DataFrame(columns=["SKU","Descrição","Valor à Prazo","Valor à Vista"])
 
 # ==========================
-# Upload de arquivos
+# Upload opcional
 # ==========================
 st.sidebar.header("📂 Upload de arquivos")
 feed_file = st.sidebar.file_uploader("Feed XML (GoogleShopping_full.xml)", type=["xml"])
@@ -195,25 +192,35 @@ with tab2:
         if not sku_input:
             st.warning("Informe o SKU do produto.")
         else:
-            sku_input_clean = sku_input.strip()
-            item = df_feed[df_feed["SKU"] == sku_input_clean]
+            sku_clean = sku_input.strip()
+            item = df_feed[df_feed["SKU"] == sku_clean]
             if item.empty:
                 st.error("SKU não encontrado no feed.")
             else:
                 valor_base = item["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item["Valor à Prazo"].values[0]
                 frete_valor = float(frete_input.replace(",", ".")) if frete_checkbox else 0
 
-                ipi_item = df_ipi[df_ipi["SKU"] == sku_input_clean]
+                # 🔹 Buscar IPI: primeiro IPI Itens, depois TIPI.xlsx
+                ipi_item = df_ipi[df_ipi["SKU"] == sku_clean]
                 if not ipi_item.empty:
                     ipi_percentual = float(ipi_item["IPI %"].values[0])
                 else:
-                    ipi_percentual = 0
+                    # Usar TIPI.xlsx via NCM se disponível
+                    ncm_produto = df_full[df_full["codigo"].notna()]["codigo"].iloc[0] if not df_full.empty else None
+                    if ncm_produto:
+                        ipi_tipi = df_full[df_full["codigo"] == ncm_produto]
+                        if not ipi_tipi.empty and ipi_tipi["IPI"].values[0] != "NT":
+                            ipi_percentual = float(ipi_tipi["IPI"].values[0])
+                        else:
+                            ipi_percentual = 0
+                    else:
+                        ipi_percentual = 0
 
                 base, ipi_valor, valor_final = calcular_preco(valor_base, ipi_percentual, frete_valor)
 
-                st.success(f"✅ Cálculo realizado para SKU {sku_input_clean}")
+                st.success(f"✅ Cálculo realizado para SKU {sku_clean}")
                 st.table({
-                    "SKU":[sku_input_clean],
+                    "SKU":[sku_clean],
                     "Descrição":[item["Descrição"].values[0]],
                     "Valor Base":[base],
                     "Frete":[frete_valor],
