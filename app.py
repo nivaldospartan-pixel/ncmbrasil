@@ -11,7 +11,7 @@ from rapidfuzz import process, fuzz
 # ==========================
 st.set_page_config(page_title="Sistema Integrado NCM/IPI", layout="wide")
 st.title("💻 Sistema Integrado NCM/IPI")
-st.markdown("Consulta NCM e cálculo automático de IPI usando feed XML e TIPI.")
+st.markdown("Consulta NCM e cálculo automático de IPI usando feed XML, TIPI e planilha de SKUs.")
 
 # ==========================
 # Funções utilitárias
@@ -162,13 +162,14 @@ if st.button("Calcular Preço"):
         st.warning("Digite o SKU")
     else:
         sku_clean = sku_input.strip()
+        # Buscar item no feed
         item_feed = df_feed[df_feed["SKU"] == sku_clean]
         if item_feed.empty:
             st.error("SKU não encontrado no feed.")
         else:
-            # Selecionar valor
+            # Selecionar valor do produto
             valor_produto = item_feed["Valor à Vista"].values[0] if tipo_valor=="À Vista" else item_feed["Valor à Prazo"].values[0]
-            
+
             # Buscar NCM do SKU
             sku_info = df_ipi_itens[df_ipi_itens["SKU"]==sku_clean]
             if sku_info.empty:
@@ -182,6 +183,7 @@ if st.button("Calcular Preço"):
                 # Calcular valores
                 base, ipi_valor, valor_final = calcular_ipi_valor(valor_produto, ipi_percentual, frete_valor)
                 
+                # Exibir resultados
                 st.success(f"✅ Cálculo realizado para SKU {sku_clean}")
                 st.table({
                     "SKU":[sku_clean],
