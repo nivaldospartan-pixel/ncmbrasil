@@ -7,8 +7,23 @@ import os
 import xml.etree.ElementTree as ET
 
 # --- Configuração da página ---
-st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide")
+st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
+st.markdown(
+    """
+    <style>
+    .stButton>button {background-color:#4B8BBE; color:white; font-weight:bold; border-radius:10px; padding:10px 20px;}
+    .stRadio>div>div {flex-direction:row;}
+    .stTextInput>div>input {border-radius:10px; padding:10px;}
+    .stNumberInput>div>input {border-radius:10px; padding:10px;}
+    .stTable {border-radius:10px; overflow:hidden;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("📦 Dashboard NCM & IPI")
+st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
+st.markdown("---")
 
 # ==========================
 # --- Funções utilitárias ---
@@ -24,7 +39,7 @@ def normalizar(texto):
     return re.sub(r"\s+", " ", texto)
 
 # ==========================
-# --- Carregar TIPI ---
+# --- Carregamento de dados ---
 # ==========================
 def carregar_tipi(caminho="tipi.xlsx"):
     if os.path.exists(caminho):
@@ -36,18 +51,8 @@ def carregar_tipi(caminho="tipi.xlsx"):
             df["codigo"] = df["codigo"].apply(padronizar_codigo)
             df["IPI"] = pd.to_numeric(df["IPI"], errors="coerce").fillna(0.0)
             return df
-        else:
-            st.warning("TIPI não possui as colunas necessárias.")
-            return pd.DataFrame(columns=["codigo", "IPI"])
-    else:
-        st.warning("Arquivo TIPI não encontrado.")
-        return pd.DataFrame(columns=["codigo", "IPI"])
+    return pd.DataFrame(columns=["codigo", "IPI"])
 
-df_tipi = carregar_tipi()
-
-# ==========================
-# --- Carregar IPI Itens ---
-# ==========================
 def carregar_ipi_itens(caminho="IPI Itens.xlsx"):
     if os.path.exists(caminho):
         df = pd.read_excel(caminho, engine="openpyxl", dtype=str)
@@ -56,99 +61,8 @@ def carregar_ipi_itens(caminho="IPI Itens.xlsx"):
         df["Valor à Vista"] = df["Valor à Vista"].astype(str).str.replace(",", ".").astype(float)
         df["IPI %"] = df["IPI %"].astype(str).str.replace(",", ".").astype(float)
         return df
-    else:
-        st.warning("Arquivo IPI Itens não encontrado.")
-        return pd.DataFrame(columns=["SKU","Descrição Item","Valor à Prazo","Valor à Vista","IPI %"])
+    return pd.DataFrame(columns=["SKU","Descrição Item","Valor à Prazo","Valor à Vista","IPI %"])
 
-df_ipi = carregar_ipi_itens()
-
-# ==========================
-# --- Funções XML Google Shopping ---
-# ==========================
-def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
-    if not os.path.exists(caminho_xml):
-        return None, "Arquivo XML não encontrado."
-
-    try:
-        tree = ET.parse(caminho_xml)
-        root = tree.getroot()
-
-        for item in root.iter():
-            if item.tag.split("}")[-1] != "item":
-                continue
-
-            g_id = None
-            titulo = ""
-            link = ""
-            preco_prazo = ""
-            preco_vista = ""
-            descricao = ""
-            ncm = ""
-
-            for child in item:
-                tag = child.tag.split("}")[-1]
-                text = child.text.strip() if child.text else ""
-
-                if tag == "id":
-                    g_id = text
-                elif tag == "title":
-                    titulo = text
-                elif tag == "link":
-                    link = text
-                elif tag == "price":
-                    preco_prazo = text
-                elif tag == "sale_price":
-                    preco_vista = text
-                elif tag == "description":
-                    descricao = text
-                elif tag.lower() == "g:ncm" or tag.lower() == "ncm":
-                    ncm = text
-
-            if g_id == str(sku):
-                preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
-                preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
-
-                return {
-                    "SKU": sku,
-                    "Título": titulo,
-                    "Link": link,
-                    "Valor à Prazo": preco_prazo_val,
-                    "Valor à Vista": preco_vista_val,
-                    "Descrição": descricao,
-                    "NCM": ncm
-                }, None
-
-        return None, "SKU não encontrado no XML."
-    except ET.ParseError:
-        return None, "Erro ao ler o XML."
-
-# ==========================
-# --- Função de cálculo ---
-# ==========================
-def calcular_preco_final(sku, valor_final_desejado, frete=0):
-    item = df_ipi[df_ipi['SKU'] == str(sku)]
-    if item.empty:
-        return None, "SKU não encontrado na planilha IPI Itens."
-
-    descricao = item['Descrição Item'].values[0]
-    ipi_percentual = item['IPI %'].values[0] / 100
-
-    # Valor base
-    base_calculo = valor_final_desejado / (1 + ipi_percentual)
-    valor_total = base_calculo + frete
-    ipi_valor = valor_total * ipi_percentual
-    valor_final = valor_total + ipi_valor
-
-    return descricao, {
-        "valor_base": round(base_calculo, 2),
-        "frete": round(frete, 2),
-        "ipi": round(ipi_valor, 2),
-        "valor_final": round(valor_final, 2)
-    }, None
-
-# ==========================
-# --- Funções NCM/IPI ---
-# ==========================
 def carregar_ncm(caminho="ncm_todos.csv"):
     if os.path.exists(caminho):
         df = pd.read_csv(caminho, dtype=str)
@@ -156,11 +70,57 @@ def carregar_ncm(caminho="ncm_todos.csv"):
         df["codigo"] = df["codigo"].apply(padronizar_codigo)
         df["descricao"] = df["descricao"].astype(str)
         return df
-    else:
-        st.warning("Arquivo CSV NCM não encontrado.")
-        return pd.DataFrame(columns=["codigo", "descricao"])
+    return pd.DataFrame(columns=["codigo", "descricao"])
 
+df_tipi = carregar_tipi()
+df_ipi = carregar_ipi_itens()
 df_ncm = carregar_ncm()
+
+# ==========================
+# --- Funções principais ---
+# ==========================
+def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
+    if not os.path.exists(caminho_xml):
+        return None, "Arquivo XML não encontrado."
+    try:
+        tree = ET.parse(caminho_xml)
+        root = tree.getroot()
+        for item in root.iter():
+            if item.tag.split("}")[-1] != "item":
+                continue
+            g_id, titulo, link, preco_prazo, preco_vista, descricao, ncm = None, "", "", "", "", "", ""
+            for child in item:
+                tag = child.tag.split("}")[-1]
+                text = child.text.strip() if child.text else ""
+                if tag == "id": g_id = text
+                elif tag == "title": titulo = text
+                elif tag == "link": link = text
+                elif tag == "price": preco_prazo = text
+                elif tag == "sale_price": preco_vista = text
+                elif tag == "description": descricao = text
+                elif tag.lower() == "g:ncm" or tag.lower() == "ncm": ncm = text
+            if g_id == str(sku):
+                preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
+                preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
+                return {
+                    "SKU": sku, "Título": titulo, "Link": link,
+                    "Valor à Prazo": preco_prazo_val, "Valor à Vista": preco_vista_val,
+                    "Descrição": descricao, "NCM": ncm
+                }, None
+        return None, "SKU não encontrado no XML."
+    except ET.ParseError:
+        return None, "Erro ao ler o XML."
+
+def calcular_preco_final(sku, valor_final_desejado, frete=0):
+    item = df_ipi[df_ipi['SKU'] == str(sku)]
+    if item.empty: return None, "SKU não encontrado na planilha IPI Itens."
+    descricao = item['Descrição Item'].values[0]
+    ipi_percentual = item['IPI %'].values[0] / 100
+    base_calculo = valor_final_desejado / (1 + ipi_percentual)
+    valor_total = base_calculo + frete
+    ipi_valor = valor_total * ipi_percentual
+    valor_final = valor_total + ipi_valor
+    return descricao, {"valor_base": round(base_calculo,2),"frete": round(frete,2),"ipi": round(ipi_valor,2),"valor_final": round(valor_final,2)}, None
 
 def buscar_por_codigo(df, codigo):
     codigo = padronizar_codigo(codigo)
@@ -180,57 +140,46 @@ def buscar_por_descricao(df, termo, limite=10):
         codigo = df.loc[idx, "codigo"]
         ipi_val = df_tipi[df_tipi["codigo"] == codigo]["IPI"].values
         ipi_val = ipi_val[0] if len(ipi_val) > 0 else "NT"
-        resultados.append({
-            "codigo": codigo,
-            "descricao": df.loc[idx, "descricao"],
-            "IPI": ipi_val,
-            "similaridade": round(score, 2)
-        })
+        resultados.append({"codigo": codigo, "descricao": df.loc[idx, "descricao"], "IPI": ipi_val, "similaridade": round(score,2)})
     return resultados
 
 # ==========================
 # --- Interface Streamlit ---
 # ==========================
-tab1, tab2, tab3 = st.tabs(["Consulta de SKU no XML", "Cálculo do IPI", "Consulta NCM/IPI"])
+tab1, tab2, tab3 = st.tabs(["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦"])
 
-# --- Aba 1: Consulta de SKU ---
 with tab1:
-    st.header("🧾 Consulta de SKU no XML")
+    st.subheader("Consulta de SKU no XML")
     sku_input = st.text_input("Digite o SKU do produto:")
     if sku_input:
         item_info, erro = buscar_sku_xml(sku_input)
         if erro:
             st.error(erro)
         else:
-            st.subheader(f"Informações do SKU {sku_input}")
-            st.write("**Título:**", item_info["Título"])
-            st.write("**Descrição:**", item_info["Descrição"])
-            st.write("**Link do Produto:**", item_info["Link"])
-            st.write("**Valores do XML:**")
-            st.write("• Valor à Prazo:", item_info["Valor à Prazo"])
-            st.write("• Valor à Vista:", item_info["Valor à Vista"])
+            st.markdown(f"""
+            <div style='background-color:#f0f2f6; padding:15px; border-radius:10px'>
+            <h4>{item_info['Título']}</h4>
+            <p>{item_info['Descrição']}</p>
+            <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
+            <p><b>Valor à Prazo:</b> R$ {item_info['Valor à Prazo']}</p>
+            <p><b>Valor à Vista:</b> R$ {item_info['Valor à Vista']}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-# --- Aba 2: Cálculo do IPI ---
 with tab2:
-    st.header("💰 Cálculo do IPI")
+    st.subheader("Cálculo do IPI")
     sku_calc = st.text_input("Digite o SKU para calcular o IPI:", key="calc_sku")
     if sku_calc:
         item_info, erro = buscar_sku_xml(sku_calc)
         if erro:
             st.error(erro)
         else:
-            # 1️⃣ Escolha do valor do produto
-            opcao_valor = st.radio("Escolha o valor do produto para calcular o IPI:", ["À Prazo", "À Vista"])
+            opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo", "À Vista"])
             valor_produto = item_info["Valor à Prazo"] if opcao_valor=="À Prazo" else item_info["Valor à Vista"]
-
-            # 2️⃣ Digitar o valor final desejado
             valor_final_input = st.text_input("Digite o valor final desejado (com IPI):", value=str(valor_produto))
-
-            # Frete
             frete_checkbox = st.checkbox("O item possui frete?")
             frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
 
-            # 3️⃣ Botão Calcular
             if st.button("Calcular IPI", key="btn_calc"):
                 try:
                     valor_final = float(valor_final_input.replace(",", "."))
@@ -238,38 +187,31 @@ with tab2:
                     if erro_calc:
                         st.error(erro_calc)
                     else:
-                        # Exibir resultado na ordem solicitada
-                        st.subheader("💹 Resultado do Cálculo")
-                        df_result = pd.DataFrame([{
-                            "SKU": sku_calc,
-                            "Valor Selecionado": valor_produto,
-                            "Valor Base (Sem IPI)": resultado["valor_base"],
-                            "Frete": resultado["frete"],
-                            "IPI": resultado["ipi"],
-                            "Valor Final (Com IPI e Frete)": resultado["valor_final"],
-                            "Descrição": descricao
-                        }])
-                        st.table(df_result)
-
-                        # 4️⃣ Descrição detalhada e link por último
-                        st.write("**Descrição detalhada do produto:**")
-                        st.write(item_info["Descrição"])
-                        st.write("**Link do produto:**", item_info["Link"])
+                        st.markdown(f"""
+                        <div style='background-color:#eaf2f8; padding:15px; border-radius:10px'>
+                        <h4>Resultado do Cálculo</h4>
+                        <p><b>SKU:</b> {sku_calc}</p>
+                        <p><b>Valor Selecionado:</b> R$ {valor_produto}</p>
+                        <p><b>Valor Base (Sem IPI):</b> R$ {resultado['valor_base']}</p>
+                        <p><b>Frete:</b> R$ {resultado['frete']}</p>
+                        <p><b>IPI:</b> R$ {resultado['ipi']}</p>
+                        <p><b>Valor Final (Com IPI e Frete):</b> R$ {resultado['valor_final']}</p>
+                        <p><b>Descrição:</b> {descricao}</p>
+                        <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
+                        </div>
+                        """, unsafe_allow_html=True)
                 except ValueError:
                     st.error("Valores inválidos. Use apenas números para valor final e frete.")
 
-# --- Aba 3: Consulta NCM/IPI ---
 with tab3:
-    st.header("🔍 Consulta de NCM/IPI")
+    st.subheader("Consulta NCM/IPI")
     opcao_busca = st.radio("Tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
     if opcao_busca == "Por código":
         codigo_input = st.text_input("Digite o código NCM:", key="ncm_codigo")
         if codigo_input:
             resultado = buscar_por_codigo(df_ncm, codigo_input)
-            if "erro" in resultado:
-                st.warning(resultado["erro"])
-            else:
-                st.table(pd.DataFrame([resultado]))
+            if "erro" in resultado: st.warning(resultado["erro"])
+            else: st.table(pd.DataFrame([resultado]))
     else:
         termo_input = st.text_input("Digite parte da descrição:", key="ncm_desc")
         if termo_input:
