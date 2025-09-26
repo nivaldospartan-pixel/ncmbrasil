@@ -6,7 +6,7 @@ import re
 from rapidfuzz import process, fuzz
 import os
 
-st.set_page_config(page_title="Consulta NCM e Calculadora IPI", layout="wide")
+st.set_page_config(page_title="Consulta NCM & Calculadora IPI", layout="wide")
 st.title("📦 Consulta NCM & 🧾 Calculadora de IPI")
 st.caption("NextSolutions - By Nivaldo Freitas")
 
