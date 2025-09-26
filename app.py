@@ -3,8 +3,8 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import unidecode
 import re
-import os
 from rapidfuzz import process, fuzz
+import os
 
 # --- Configuração da página ---
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide")
@@ -71,7 +71,8 @@ def carregar_tipi(caminho="tipi.xlsx"):
             df = df[["ncm", "aliquota (%)"]].copy()
             df.rename(columns={"ncm": "codigo", "aliquota (%)": "IPI"}, inplace=True)
             df["codigo"] = df["codigo"].apply(padronizar_codigo)
-            df["IPI"] = df["IPI"].fillna(0).astype(float)
+            # Corrigir conversão para float, valores inválidos viram 0.0
+            df["IPI"] = pd.to_numeric(df["IPI"].str.replace(",", "."), errors="coerce").fillna(0.0)
             return df
         else:
             st.warning("TIPI não possui as colunas necessárias.")
@@ -84,7 +85,7 @@ def carregar_tipi(caminho="tipi.xlsx"):
 df_ncm = carregar_ncm()
 df_tipi = carregar_tipi()
 df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
-df_full["IPI"] = df_full["IPI"].fillna(0)
+df_full["IPI"] = df_full["IPI"].fillna(0.0)
 
 # ==========================
 # --- Consulta e cálculo de SKU no XML ---
@@ -114,6 +115,14 @@ def buscar_sku_xml(sku):
             }, None
     return None, "SKU não encontrado no XML."
 
+# Carregar planilha de IPI Itens
+ipi_file = "IPI Itens.xlsx"
+df_ipi = pd.read_excel(ipi_file, engine="openpyxl")
+df_ipi["SKU"] = df_ipi["SKU"].astype(str)
+df_ipi["Valor à Prazo"] = df_ipi["Valor à Prazo"].astype(str).str.replace(",",".").astype(float)
+df_ipi["Valor à Vista"] = df_ipi["Valor à Vista"].astype(str).str.replace(",",".").astype(float)
+df_ipi["IPI %"] = df_ipi["IPI %"].astype(str).str.replace(",",".").astype(float)
+
 def calcular_preco_final(sku, valor_final_desejado, frete=0):
     item = df_ipi[df_ipi['SKU'] == str(sku)]
     if item.empty:
@@ -132,14 +141,6 @@ def calcular_preco_final(sku, valor_final_desejado, frete=0):
         "ipi": round(ipi_valor,2),
         "valor_final": round(valor_final,2)
     }, None
-
-# Carregar planilha de IPI Itens
-ipi_file = "IPI Itens.xlsx"
-df_ipi = pd.read_excel(ipi_file, engine="openpyxl")
-df_ipi["SKU"] = df_ipi["SKU"].astype(str)
-df_ipi["Valor à Prazo"] = df_ipi["Valor à Prazo"].astype(str).str.replace(",",".").astype(float)
-df_ipi["Valor à Vista"] = df_ipi["Valor à Vista"].astype(str).str.replace(",",".").astype(float)
-df_ipi["IPI %"] = df_ipi["IPI %"].astype(str).str.replace(",",".").astype(float)
 
 # ==========================
 # --- Interface principal ---
@@ -165,7 +166,7 @@ with tab1:
             if resultados:
                 df_resultados = pd.DataFrame(resultados)
                 df_resultados = df_resultados.sort_values(by="similaridade", ascending=False).reset_index(drop=True)
-                df_resultados["IPI"] = df_resultados["IPI"].apply(lambda x: f"✅ {x}" if x != "NT" else f"❌ {x}")
+                df_resultados["IPI"] = df_resultados["IPI"].apply(lambda x: f"✅ {x}" if x != 0 else f"❌ {x}")
                 st.dataframe(df_resultados, height=400)
             else:
                 st.warning("⚠️ Nenhum resultado encontrado.")
@@ -191,26 +192,24 @@ with tab2:
             # Botão calcular
             if st.button("Calcular IPI"):
                 try:
-                    valor_final = float(valor_final_input.replace(",","."))
-                    resultado, erro_calc = calcular_preco_final(sku_input, valor_final, frete_valor)
+                    valor_final_desejado = float(valor_final_input.replace(",","."))
+                    resultado, erro_calc = calcular_preco_final(sku_input, valor_final_desejado, frete_valor)
                     if erro_calc:
                         st.error(erro_calc)
                     else:
-                        df_result = pd.DataFrame([{
-                            "SKU": sku_input,
-                            "Descrição": item_info["Título"],
-                            "Valor Selecionado": valor_selecionado,
-                            "Valor Base (Sem IPI)": resultado["valor_base"],
-                            "Frete": resultado["frete"],
-                            "IPI": resultado["ipi"],
-                            "Valor Final (Com IPI e Frete)": resultado["valor_final"]
-                        }])
-                        st.subheader("💹 Resultado do Cálculo")
-                        st.table(df_result)
-
-                        st.subheader("📄 Informações detalhadas do produto")
-                        st.write("**Título:**", item_info["Título"])
-                        st.write("**Descrição completa:**", item_info["Descrição"])
-                        st.write("**Link do Produto:**", item_info["Link"])
+                        # Exibir resultado na ordem solicitada
+                        st.subheader("💰 Resultado do Cálculo")
+                        st.table({
+                            "SKU": [sku_input],
+                            "Descrição": [item_info["Título"]],
+                            "Valor Selecionado": [valor_selecionado],
+                            "Valor Base (Sem IPI)": [resultado["valor_base"]],
+                            "Frete": [resultado["frete"]],
+                            "IPI": [resultado["ipi"]],
+                            "Valor Final (Com IPI e Frete)": [resultado["valor_final"]]
+                        })
+                        st.write("Descrição detalhada do produto:")
+                        st.write(item_info["Descrição"])
+                        st.write("Link do produto:", item_info["Link"])
                 except ValueError:
-                    st.error("Valores inválidos. Use apenas números para valor final e frete.")
+                    st.error("Valor final inválido. Use apenas números.")
