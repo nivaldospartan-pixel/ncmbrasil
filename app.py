@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from rapidfuzz import process, fuzz
 import unidecode
 import re
 import os
@@ -14,18 +13,13 @@ st.markdown("Consulta de SKU no XML e cálculo do valor com IPI usando TIPI")
 # ==========================
 # --- Funções utilitárias ---
 # ==========================
-def normalizar(texto):
-    texto = unidecode.unidecode(str(texto).lower())
-    texto = re.sub(r"[^a-z0-9\s]", " ", texto)
-    return re.sub(r"\s+", " ", texto)
-
 def padronizar_codigo(codigo):
     codigo = str(codigo).replace(".", "").strip()
     codigo = codigo[:8].zfill(8)
     return codigo
 
 # ==========================
-# --- Carregamento CSV e TIPI ---
+# --- Carregamento TIPI ---
 # ==========================
 def carregar_tipi(caminho="tipi.xlsx"):
     if os.path.exists(caminho):
@@ -35,7 +29,8 @@ def carregar_tipi(caminho="tipi.xlsx"):
             df = df[["ncm", "aliquota (%)"]].copy()
             df.rename(columns={"ncm": "codigo", "aliquota (%)": "IPI"}, inplace=True)
             df["codigo"] = df["codigo"].apply(padronizar_codigo)
-            df["IPI"] = df["IPI"].fillna("0").astype(float)
+            # Conversão segura para float
+            df["IPI"] = pd.to_numeric(df["IPI"], errors="coerce").fillna(0.0)
             return df
         else:
             st.warning("TIPI não possui as colunas necessárias.")
@@ -43,6 +38,8 @@ def carregar_tipi(caminho="tipi.xlsx"):
     else:
         st.warning("Arquivo TIPI não encontrado.")
         return pd.DataFrame(columns=["codigo", "IPI"])
+
+df_tipi = carregar_tipi()
 
 # ==========================
 # --- Funções XML Google Shopping ---
@@ -65,7 +62,7 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
             preco_prazo = ""
             preco_vista = ""
             descricao = ""
-            ncm = ""  # opcional: se NCM estiver no XML
+            ncm = ""  
 
             for child in item:
                 tag = child.tag.split("}")[-1]
@@ -114,11 +111,6 @@ def calcular_valor_com_ipi(valor_produto, aliquota_ipi, frete=0):
     return round(valor_base,2), round(ipi_valor,2), round(valor_final,2)
 
 # ==========================
-# --- Carregar TIPI ---
-# ==========================
-df_tipi = carregar_tipi()
-
-# ==========================
 # --- Interface Streamlit ---
 # ==========================
 st.header("🧾 Consulta de SKU no XML e cálculo do IPI")
@@ -138,14 +130,12 @@ if sku_input:
         st.write("• Valor à Prazo:", item_info["Valor à Prazo"])
         st.write("• Valor à Vista:", item_info["Valor à Vista"])
 
-        # Selecionar valor a usar
         opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo", "À Vista"])
         valor_selecionado = item_info["Valor à Prazo"] if opcao_valor=="À Prazo" else item_info["Valor à Vista"]
 
         frete_checkbox = st.checkbox("O item possui frete?")
         frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
 
-        # Buscar alíquota do IPI pelo NCM
         ncm_codigo = padronizar_codigo(item_info.get("NCM", "0"))
         aliquota_ipi = 0.0
         if ncm_codigo in df_tipi["codigo"].values:
