@@ -11,28 +11,29 @@ st.caption("NextSolutions - By Nivaldo Freitas")
 
 # --- Função de normalização ---
 def normalizar(texto):
-    """Normaliza texto removendo acentos, deixando minúsculo e retirando caracteres especiais."""
+    """Normaliza texto: remove acentos, converte para minúsculo e remove caracteres especiais."""
     texto = unidecode.unidecode(str(texto).lower())
     texto = re.sub(r"[^a-z0-9\s]", " ", texto)
     return re.sub(r"\s+", " ", texto)
 
+# --- Função para padronizar código NCM ---
+def padronizar_codigo(codigo):
+    """Remove pontos, pega os 8 primeiros dígitos e preenche zeros à esquerda."""
+    codigo = str(codigo).replace(".", "").strip()
+    codigo = codigo[:8].zfill(8)
+    return codigo
+
 # --- Funções de busca ---
 def buscar_por_codigo(df, codigo):
-    """
-    Busca NCM pelo código.
-    Retorna todos os registros correspondentes como lista de dicionários.
-    """
-    codigo = str(codigo).replace(".", "").zfill(8)
+    """Busca NCM pelo código e retorna todos os registros correspondentes."""
+    codigo = padronizar_codigo(codigo)
     resultado = df[df["codigo"] == codigo]
     if not resultado.empty:
         return resultado.to_dict(orient="records")
     return {"erro": f"NCM {codigo} não encontrado"}
 
 def buscar_por_descricao(df, termo, limite=10):
-    """
-    Busca NCMs por descrição aproximada usando fuzzy matching.
-    Retorna uma lista com os resultados mais relevantes.
-    """
+    """Busca NCMs por descrição aproximada usando fuzzy matching."""
     termo_norm = normalizar(termo)
     descricoes_norm = df["descricao"].apply(normalizar)
     escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=limite)
@@ -54,13 +55,13 @@ xlsx_file = st.file_uploader("Carregar arquivo TIPI (XLSX)", type=["xlsx"])
 df_full = None
 
 if csv_file:
-    # --- Carrega NCM ---
+    # --- Carregar base NCM ---
     df_ncm = pd.read_csv(csv_file, dtype=str)
     df_ncm.rename(columns={df_ncm.columns[0]: "codigo", df_ncm.columns[1]: "descricao"}, inplace=True)
-    df_ncm["codigo"] = df_ncm["codigo"].astype(str).str.replace(".", "", regex=False).str.zfill(8)
+    df_ncm["codigo"] = df_ncm["codigo"].apply(padronizar_codigo)
     df_ncm["descricao"] = df_ncm["descricao"].astype(str)
-    
-    # --- Carrega TIPI e merge ---
+
+    # --- Carregar TIPI e fazer merge ---
     if xlsx_file:
         df_tipi = pd.read_excel(xlsx_file, dtype=str)
         df_tipi.columns = [unidecode.unidecode(c.strip().lower()) for c in df_tipi.columns]
@@ -68,10 +69,10 @@ if csv_file:
         if "ncm" in df_tipi.columns and "aliquota (%)" in df_tipi.columns:
             df_tipi = df_tipi[["ncm", "aliquota (%)"]].copy()
             df_tipi.rename(columns={"ncm": "codigo", "aliquota (%)": "IPI"}, inplace=True)
-            df_tipi["codigo"] = df_tipi["codigo"].astype(str).str.replace(".", "", regex=False).str[:8].str.zfill(8)
+            df_tipi["codigo"] = df_tipi["codigo"].apply(padronizar_codigo)
             df_tipi["IPI"] = df_tipi["IPI"].fillna("NT")
 
-            # Merge NCM com TIPI (left join)
+            # Merge com prioridade para TIPI
             df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
             df_full["IPI"] = df_full["IPI"].fillna("NT")
     else:
