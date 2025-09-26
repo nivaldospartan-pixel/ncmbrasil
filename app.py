@@ -1,46 +1,13 @@
-import os
+import streamlit as st
 import pandas as pd
 from rapidfuzz import process, fuzz
 import unidecode
 import re
 
-# --- Arquivos ---
-CSV_NCM = "ncm_todos.csv"
-XLSX_TIPI = "tipi.xlsx"
+st.set_page_config(page_title="Consulta de NCM Brasil", layout="wide")
 
-# --- Carregar NCM ---
-def carregar_ncm():
-    if os.path.exists(CSV_NCM):
-        df = pd.read_csv(CSV_NCM, dtype=str)
-        # Colunas
-        df.rename(columns={df.columns[0]: "codigo", df.columns[1]: "descricao"}, inplace=True)
-        df["codigo"] = df["codigo"].astype(str).str.replace(".", "", regex=False).str.zfill(8)
-        df["descricao"] = df["descricao"].astype(str)
-        print(f"📂 NCM carregada do arquivo local ({len(df)} registros)")
-        return df
-    else:
-        raise SystemExit("❌ Nenhum CSV NCM disponível.")
-
-# --- Carregar TIPI ---
-def carregar_tipi():
-    if os.path.exists(XLSX_TIPI):
-        df = pd.read_excel(XLSX_TIPI, dtype=str)
-        # Normalizar nomes de colunas
-        df.columns = [unidecode.unidecode(c.strip().lower()) for c in df.columns]
-
-        # Verificar colunas necessárias
-        if "ncm" not in df.columns or "aliquota (%)" not in df.columns:
-            raise SystemExit("❌ Colunas NCM ou ALÍQUOTA (%) não encontradas no XLSX.")
-
-        # Padronizar códigos: remover pontos, pegar os primeiros 8 dígitos
-        df = df[["ncm", "aliquota (%)"]].copy()
-        df.rename(columns={"ncm": "codigo", "aliquota (%)": "IPI"}, inplace=True)
-        df["codigo"] = df["codigo"].astype(str).str.replace(".", "", regex=False).str[:8].str.zfill(8)
-        df["IPI"] = df["IPI"].fillna("NT")
-        print(f"📂 TIPI carregada do XLSX ({len(df)} registros)")
-        return df
-    else:
-        raise SystemExit(f"❌ Arquivo {XLSX_TIPI} não encontrado.")
+st.title("Consulta de NCM Brasil")
+st.caption("NextSolutions - By Nivaldo Freitas")
 
 # --- Normalização ---
 def normalizar(texto):
@@ -70,39 +37,50 @@ def buscar_por_descricao(df, termo, limite=10):
         })
     return resultados
 
-# --- Programa principal ---
-if __name__ == "__main__":
-    print("=== Consulta de NCM Brasil ===")
+# --- Upload de arquivos ---
+csv_file = st.file_uploader("Carregar arquivo CSV NCM", type=["csv"])
+xlsx_file = st.file_uploader("Carregar arquivo TIPI (XLSX)", type=["xlsx"])
 
-    df_ncm = carregar_ncm()
-    df_tipi = carregar_tipi()
+df_full = None
 
-    # Merge NCM + TIPI
-    df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
-    df_full["IPI"] = df_full["IPI"].fillna("NT")
+if csv_file:
+    df_ncm = pd.read_csv(csv_file, dtype=str)
+    df_ncm.rename(columns={df_ncm.columns[0]: "codigo", df_ncm.columns[1]: "descricao"}, inplace=True)
+    df_ncm["codigo"] = df_ncm["codigo"].astype(str).str.replace(".", "", regex=False).str.zfill(8)
+    df_ncm["descricao"] = df_ncm["descricao"].astype(str)
 
-    print("\n1 - Buscar por código NCM")
-    print("2 - Buscar por título (descrição aproximada)")
-    opcao = input("Escolha uma opção (1 ou 2): ").strip()
-
-    if opcao == "1":
-        codigo = input("Digite o código NCM (ex: 90311000): ").strip()
-        resultado = buscar_por_codigo(df_full, codigo)
-        if "erro" in resultado:
-            print(resultado["erro"])
-        else:
-            print(f"codigo: {resultado['codigo']}")
-            print(f"descricao: {resultado['descricao']}")
-            print(f"IPI: {resultado.get('IPI', 'NT')}")
-
-    elif opcao == "2":
-        termo = input("Digite parte da descrição do produto: ").strip()
-        resultados = buscar_por_descricao(df_full, termo)
-        if resultados:
-            print("\n=== Resultados mais próximos ===")
-            for item in resultados:
-                print(f"{item['codigo']} - {item['descricao']} (IPI: {item['IPI']}, similaridade: {item['similaridade']}%)")
-        else:
-            print("⚠️ Nenhum resultado encontrado.")
+    if xlsx_file:
+        df_tipi = pd.read_excel(xlsx_file, dtype=str)
+        df_tipi.columns = [unidecode.unidecode(c.strip().lower()) for c in df_tipi.columns]
+        if "ncm" in df_tipi.columns and "aliquota (%)" in df_tipi.columns:
+            df_tipi = df_tipi[["ncm", "aliquota (%)"]].copy()
+            df_tipi.rename(columns={"ncm": "codigo", "aliquota (%)": "IPI"}, inplace=True)
+            df_tipi["codigo"] = df_tipi["codigo"].astype(str).str.replace(".", "", regex=False).str[:8].str.zfill(8)
+            df_tipi["IPI"] = df_tipi["IPI"].fillna("NT")
+            df_full = pd.merge(df_ncm, df_tipi, on="codigo", how="left")
+            df_full["IPI"] = df_full["IPI"].fillna("NT")
     else:
-        print("⚠️ Opção inválida!")
+        df_full = df_ncm
+        df_full["IPI"] = "NT"
+
+    st.success(f"📂 Base carregada com {len(df_full)} registros!")
+
+    opcao = st.radio("Escolha uma opção", ["Buscar por código", "Buscar por descrição"])
+
+    if opcao == "Buscar por código":
+        codigo = st.text_input("Digite o código NCM (ex: 90311000)")
+        if codigo:
+            resultado = buscar_por_codigo(df_full, codigo)
+            if "erro" in resultado:
+                st.warning(resultado["erro"])
+            else:
+                st.json(resultado)
+
+    elif opcao == "Buscar por descrição":
+        termo = st.text_input("Digite parte da descrição do produto")
+        if termo:
+            resultados = buscar_por_descricao(df_full, termo)
+            if resultados:
+                st.dataframe(pd.DataFrame(resultados))
+            else:
+                st.warning("⚠️ Nenhum resultado encontrado.")
