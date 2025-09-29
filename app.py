@@ -3,7 +3,6 @@ import pandas as pd
 import unidecode
 import re
 import os
-import xml.etree.ElementTree as ET
 from rapidfuzz import process, fuzz
 from datetime import datetime, timedelta
 import hashlib
@@ -33,14 +32,11 @@ st.markdown("---")
 USERS_FILE = "users.csv"
 if not os.path.exists(USERS_FILE):
     df_users = pd.DataFrame(columns=["username", "password_hash", "tipo", "validade", "ultimo_acesso", "groqk_key"])
-    # Primeiro admin inicial
     pw_hash = hashlib.sha256("admin@123".encode()).hexdigest()
     df_users.loc[0] = ["admin", pw_hash, "admin", (datetime.now()+timedelta(days=365)).strftime('%Y-%m-%d'), datetime.now().strftime('%Y-%m-%d'), ""]
     df_users.to_csv(USERS_FILE, index=False)
 else:
     df_users = pd.read_csv(USERS_FILE)
-
-# Funções de utilidade
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -53,9 +49,6 @@ def check_login(username, password):
             return True, row.to_dict()
     return False, None
 
-# Carregar dados exemplo (TIPI, NCM, IPI Itens)
-# Aqui você substitui pelos arquivos reais
-
 def padronizar_codigo(codigo):
     codigo = str(codigo).replace('.', '').strip()
     return codigo[:8].zfill(8)
@@ -65,6 +58,9 @@ def normalizar(texto):
     texto = re.sub(r'[^a-z0-9\s]', ' ', texto)
     return re.sub(r'\s+', ' ', texto)
 
+# ----------------------
+# Dados de exemplo
+# ----------------------
 df_tipi = pd.DataFrame({"codigo": ["01010101", "02020202"], "IPI": [5.0, 10.0]})
 df_ipi = pd.DataFrame({"SKU":["1001","1002"], "Descrição Item":["Produto A","Produto B"], "Valor à Prazo":[100.0,200.0], "Valor à Vista":[95.0,190.0], "IPI %":[5.0,10.0], "NCM":["01010101","02020202"]})
 df_ncm = pd.DataFrame({"codigo":["01010101","02020202"],"descricao":["Produto A","Produto B"]})
@@ -72,21 +68,21 @@ df_ncm = pd.DataFrame({"codigo":["01010101","02020202"],"descricao":["Produto A"
 # ----------------------
 # Login
 # ----------------------
-with st.sidebar:
-    st.subheader("Login")
-    username = st.text_input("Usuário")
-    password = st.text_input("Senha", type="password")
-    login_btn = st.button("Login")
-
-if login_btn:
-    ok, user = check_login(username, password)
-    if ok:
-        st.session_state['user'] = user
-        df_users.loc[df_users['username']==username,'ultimo_acesso'] = datetime.now().strftime('%Y-%m-%d')
-        df_users.to_csv(USERS_FILE,index=False)
-        st.experimental_rerun()
-    else:
-        st.error("Usuário ou senha incorretos")
+if 'user' not in st.session_state:
+    with st.sidebar:
+        st.subheader("Login")
+        username = st.text_input("Usuário")
+        password = st.text_input("Senha", type="password")
+        login_btn = st.button("Login")
+        if login_btn:
+            ok, user = check_login(username, password)
+            if ok:
+                st.session_state['user'] = user
+                df_users.loc[df_users['username']==username,'ultimo_acesso'] = datetime.now().strftime('%Y-%m-%d')
+                df_users.to_csv(USERS_FILE,index=False)
+                st.experimental_rerun()
+            else:
+                st.error("Usuário ou senha incorretos")
 
 if 'user' in st.session_state:
     user = st.session_state['user']
@@ -95,16 +91,15 @@ if 'user' in st.session_state:
     # Painel Admin
     if user['tipo']=='admin':
         st.sidebar.subheader("Painel Admin")
-        admin_action = st.sidebar.radio("Ações:", ["Gerenciar Usuários", "Alterar Minha Senha"]) 
+        admin_action = st.sidebar.radio("Ações:", ["Gerenciar Usuários", "Alterar Minha Senha"])
         if admin_action == "Gerenciar Usuários":
             st.subheader("Gerenciar Usuários")
             st.dataframe(df_users)
-            # Aqui poderia adicionar criar/editar/excluir usuário e validade
 
     # ----------------------
     # Dashboard Tabs
     # ----------------------
-    tab1, tab2, tab3, tab4 = st.tabs(["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦","PowerBI 📊"])
+    tab1, tab2, tab3 = st.tabs(["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦"])
 
     # ---- Consulta de SKU ----
     with tab1:
@@ -174,4 +169,11 @@ if 'user' in st.session_state:
                 matches = process.extract(search_ncm, df_ncm['descricao'].tolist(), limit=10)
                 match_choices = [x[0] for x in matches]
                 selected = st.selectbox("Escolha:", match_choices, key="ncm_select")
-                res
+                res_ncm = df_ncm[df_ncm['descricao']==selected]
+            for idx,row in res_ncm.iterrows():
+                st.markdown(f"""
+                <div class='card'>
+                <p>Código: {row['codigo']}</p>
+                <p>Descrição: {row['descricao']}</p>
+                </div>
+                """, unsafe_allow_html=True)
