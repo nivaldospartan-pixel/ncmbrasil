@@ -1,21 +1,22 @@
 import streamlit as st
 import pandas as pd
+import hashlib
+from datetime import datetime, timedelta
+from rapidfuzz import process, fuzz
 import unidecode
 import re
 import os
-import datetime
-from rapidfuzz import process, fuzz
-import hashlib
+import xml.etree.ElementTree as ET
 
-# --- Configurações gerais ---
+# --- Configuração da página ---
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
 st.markdown("""
 <style>
-body {background-color:#121212; color:#e0e0e0;}
+body {background-color:#121212; color:white;}
 .stButton>button {background-color:#4B8BBE; color:white; font-weight:bold; border-radius:10px; padding:10px 20px;}
-.stRadio>div>div {flex-direction:row;}
-.stTextInput>div>input, .stNumberInput>div>input {border-radius:10px; padding:10px; background-color:#1e1e1e; color:#e0e0e0;}
-.stTable {border-radius:10px; overflow:hidden; color:#e0e0e0;}
+.stTextInput>div>input, .stNumberInput>div>input {border-radius:10px; padding:10px; background-color:#1E1E1E; color:white;}
+.stSelectbox>div>div>div>div {background-color:#1E1E1E; color:white; border-radius:10px;}
+.stTable {border-radius:10px; overflow:hidden; color:white;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -23,10 +24,13 @@ st.title("📦 Dashboard NCM & IPI")
 st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
 st.markdown("---")
 
+# ==========================
 # --- Funções utilitárias ---
+# ==========================
 def padronizar_codigo(codigo):
     codigo = str(codigo).replace(".", "").strip()
-    return codigo[:8].zfill(8)
+    codigo = codigo[:8].zfill(8)
+    return codigo
 
 def normalizar(texto):
     texto = unidecode.unidecode(str(texto).lower())
@@ -36,189 +40,198 @@ def normalizar(texto):
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# --- Arquivos ---
-db_users_file = "users.csv"
+# ==========================
+# --- Carregamento de dados ---
+# ==========================
+def carregar_tipi(caminho="tipi.xlsx"):
+    if os.path.exists(caminho):
+        df = pd.read_excel(caminho, dtype=str)
+        df.columns = [unidecode.unidecode(c.strip().lower()) for c in df.columns]
+        if "ncm" in df.columns and "aliquota (%)" in df.columns:
+            df = df[["ncm", "aliquota (%)"]].copy()
+            df.rename(columns={"ncm": "codigo", "aliquota (%)": "IPI"}, inplace=True)
+            df["codigo"] = df["codigo"].apply(padronizar_codigo)
+            df["IPI"] = pd.to_numeric(df["IPI"], errors="coerce").fillna(0.0)
+            return df
+    return pd.DataFrame(columns=["codigo", "IPI"])
 
-# Inicializa df_users
-if os.path.exists(db_users_file):
-    df_users = pd.read_csv(db_users_file)
+def carregar_ipi_itens(caminho="IPI Itens.xlsx"):
+    if os.path.exists(caminho):
+        df = pd.read_excel(caminho, engine="openpyxl", dtype=str)
+        df["SKU"] = df["SKU"].astype(str)
+        df["Valor à Prazo"] = df["Valor à Prazo"].astype(str).str.replace(",", ".").astype(float)
+        df["Valor à Vista"] = df["Valor à Vista"].astype(str).str.replace(",", ".").astype(float)
+        df["IPI %"] = df["IPI %"].astype(str).str.replace(",", ".").astype(float)
+        return df
+    return pd.DataFrame(columns=["SKU","Descrição Item","Valor à Prazo","Valor à Vista","IPI %"])
+
+def carregar_ncm(caminho="ncm_todos.csv"):
+    if os.path.exists(caminho):
+        df = pd.read_csv(caminho, dtype=str)
+        df.rename(columns={df.columns[0]: "codigo", df.columns[1]: "descricao"}, inplace=True)
+        df["codigo"] = df["codigo"].apply(padronizar_codigo)
+        df["descricao"] = df["descricao"].astype(str)
+        return df
+    return pd.DataFrame(columns=["codigo", "descricao"])
+
+df_tipi = carregar_tipi()
+df_ipi = carregar_ipi_itens()
+df_ncm = carregar_ncm()
+
+# ==========================
+# --- Funções principais ---
+# ==========================
+def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
+    if not os.path.exists(caminho_xml):
+        return None, "Arquivo XML não encontrado."
+    try:
+        tree = ET.parse(caminho_xml)
+        root = tree.getroot()
+        for item in root.iter():
+            if item.tag.split("}")[-1] != "item": continue
+            g_id, titulo, link, preco_prazo, preco_vista, descricao, ncm = None, "", "", "", "", "", ""
+            for child in item:
+                tag = child.tag.split("}")[-1]
+                text = child.text.strip() if child.text else ""
+                if tag == "id": g_id = text
+                elif tag == "title": titulo = text
+                elif tag == "link": link = text
+                elif tag == "price": preco_prazo = text
+                elif tag == "sale_price": preco_vista = text
+                elif tag == "description": descricao = text
+                elif tag.lower() == "g:ncm" or tag.lower() == "ncm": ncm = text
+            if g_id == str(sku):
+                preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
+                preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
+                return {
+                    "SKU": sku, "Título": titulo, "Link": link,
+                    "Valor à Prazo": preco_prazo_val, "Valor à Vista": preco_vista_val,
+                    "Descrição": descricao, "NCM": ncm
+                }, None
+        return None, "SKU não encontrado no XML."
+    except ET.ParseError:
+        return None, "Erro ao ler o XML."
+
+def calcular_preco_final(sku, valor_final_desejado, frete=0):
+    item = df_ipi[df_ipi['SKU'] == str(sku)]
+    if item.empty: return None, "SKU não encontrado na planilha IPI Itens."
+    descricao = item['Descrição Item'].values[0]
+    ipi_percentual = item['IPI %'].values[0] / 100
+    base_calculo = valor_final_desejado / (1 + ipi_percentual)
+    valor_total = base_calculo + frete
+    ipi_valor = valor_total * ipi_percentual
+    valor_final = valor_total + ipi_valor
+    return descricao, {"valor_base": round(base_calculo,2),"frete": round(frete,2),
+                      "ipi": round(ipi_valor,2),"valor_final": round(valor_final,2)}, None
+
+def buscar_por_codigo(df, codigo):
+    codigo = padronizar_codigo(codigo)
+    resultado = df[df["codigo"] == codigo]
+    if not resultado.empty:
+        ipi_val = df_tipi[df_tipi["codigo"] == codigo]["IPI"].values
+        ipi_val = ipi_val[0] if len(ipi_val) > 0 else "NT"
+        return {"codigo": codigo, "descricao": resultado["descricao"].values[0], "IPI": ipi_val}
+    return {"erro": f"NCM {codigo} não encontrado"}
+
+def buscar_por_descricao(df, termo, limite=10):
+    termo_norm = normalizar(termo)
+    descricoes_norm = df["descricao"].apply(normalizar)
+    escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=limite)
+    resultados = []
+    for desc, score, idx in escolhas:
+        codigo = df.loc[idx, "codigo"]
+        ipi_val = df_tipi[df_tipi["codigo"] == codigo]["IPI"].values
+        ipi_val = ipi_val[0] if len(ipi_val) > 0 else "NT"
+        resultados.append({"codigo": codigo, "descricao": df.loc[idx, "descricao"],
+                           "IPI": ipi_val, "similaridade": round(score,2)})
+    return resultados
+
+# ==========================
+# --- Sistema de Usuários ---
+# ==========================
+USERS_FILE = "users.csv"
+if os.path.exists(USERS_FILE):
+    df_users = pd.read_csv(USERS_FILE, parse_dates=["validade","ultimo_acesso"])
 else:
-    df_users = pd.DataFrame(columns=["username","password_hash","tipo","data_inicio","data_fim","ultimo_acesso","groqk_key"])
-    df_users.to_csv(db_users_file,index=False)
+    df_users = pd.DataFrame(columns=["username","password_hash","tipo","validade","ultimo_acesso"])
 
-if "admin_created" not in st.session_state:
-    st.session_state.admin_created = False
-if "login_user" not in st.session_state:
-    st.session_state.login_user = None
+def salvar_usuarios():
+    df_users.to_csv(USERS_FILE,index=False)
 
-# --- Tela de cadastro do primeiro Admin ---
-if df_users.empty or (df_users['tipo']=="admin").sum()==0:
-    st.subheader("Cadastro do primeiro Admin")
-    username = st.text_input("Usuário")
-    password = st.text_input("Senha", type="password")
-    senha_conf = st.text_input("Confirmar Senha", type="password")
-    if st.button("Criar Admin"):
-        if username=="" or password=="":
-            st.error("Preencha todos os campos")
-        elif password != senha_conf:
-            st.error("Senhas não conferem")
+def criar_usuario(username, password, tipo="normal", dias_validade=30):
+    global df_users
+    pw_hash = hash_password(password)
+    validade = datetime.now() + timedelta(days=dias_validade)
+    df_users = pd.concat([df_users, pd.DataFrame([{"username":username,"password_hash":pw_hash,"tipo":tipo,
+                                                   "validade":validade,"ultimo_acesso":datetime.now()}])], ignore_index=True)
+    salvar_usuarios()
+
+# ==========================
+# --- Login / Registro ---
+# ==========================
+st.sidebar.header("🔐 Login")
+username = st.sidebar.text_input("Usuário")
+password = st.sidebar.text_input("Senha", type="password")
+login_btn = st.sidebar.button("Login")
+
+# Criar primeiro admin se não existir
+if df_users[df_users["tipo"]=="admin"].empty:
+    st.sidebar.warning("Crie o primeiro usuário admin")
+    first_admin_user = st.sidebar.text_input("Admin Usuário")
+    first_admin_pass = st.sidebar.text_input("Admin Senha", type="password")
+    if st.sidebar.button("Criar Admin"):
+        criar_usuario(first_admin_user, first_admin_pass, tipo="admin", dias_validade=365)
+        st.experimental_rerun()
+
+# ==========================
+# --- Autenticação ---
+# ==========================
+if login_btn:
+    user_row = df_users[df_users["username"]==username]
+    if not user_row.empty:
+        if user_row["password_hash"].values[0] == hash_password(password):
+            if datetime.now() > pd.to_datetime(user_row["validade"].values[0]):
+                st.sidebar.error("Acesso expirado")
+            else:
+                df_users.loc[user_row.index[0], "ultimo_acesso"] = datetime.now()
+                salvar_usuarios()
+                st.session_state["user"] = username
+                st.session_state["tipo"] = user_row["tipo"].values[0]
+                st.experimental_rerun()
         else:
-            pw_hash = hash_password(password)
-            hoje = datetime.date.today().isoformat()
-            novo_admin = pd.DataFrame([{
-                "username": username,
-                "password_hash": pw_hash,
-                "tipo": "admin",
-                "data_inicio": hoje,
-                "data_fim": (datetime.date.today()+datetime.timedelta(days=365)).isoformat(),
-                "ultimo_acesso": "",
-                "groqk_key":""
-            }])
-            df_users = pd.concat([df_users,novo_admin],ignore_index=True)
-            df_users.to_csv(db_users_file,index=False)
-            st.success("Admin criado com sucesso! Faça login agora.")
-            st.session_state.admin_created = True
+            st.sidebar.error("Senha incorreta")
+    else:
+        st.sidebar.error("Usuário não encontrado")
 
-# --- Tela de login ---
-if st.session_state.login_user is None:
-    st.subheader("Login")
-    username_login = st.text_input("Usuário")
-    password_login = st.text_input("Senha", type="password")
-    if st.button("Login"):
-        if username_login=="" or password_login=="":
-            st.error("Preencha todos os campos")
-        else:
-            user_row = df_users[df_users["username"]==username_login]
-            if user_row.empty:
-                st.error("Usuário não encontrado")
-            else:
-                pw_hash = hash_password(password_login)
-                if pw_hash != user_row["password_hash"].values[0]:
-                    st.error("Senha incorreta")
-                else:
-                    st.session_state.login_user = username_login
-                    df_users.loc[df_users["username"]==username_login,"ultimo_acesso"]=datetime.datetime.now().isoformat()
-                    df_users.to_csv(db_users_file,index=False)
-                    st.success(f"Login realizado: {username_login}")
-                    st.experimental_rerun()
+if "user" not in st.session_state:
+    st.stop()
 
-# --- Funções principais do Dashboard ---
-if st.session_state.login_user is not None:
-    st.markdown(f"**Usuário logado:** {st.session_state.login_user}")
-    
-    # --- Carregar dados ---
-    def carregar_tipi(caminho="tipi.xlsx"):
-        if os.path.exists(caminho):
-            df = pd.read_excel(caminho,dtype=str)
-            df.columns = [unidecode.unidecode(c.strip().lower()) for c in df.columns]
-            if "ncm" in df.columns and "aliquota (%)" in df.columns:
-                df = df[["ncm","aliquota (%)"]].copy()
-                df.rename(columns={"ncm":"codigo","aliquota (%)":"IPI"},inplace=True)
-                df["codigo"]=df["codigo"].apply(padronizar_codigo)
-                df["IPI"]=pd.to_numeric(df["IPI"],errors="coerce").fillna(0.0)
-                return df
-        return pd.DataFrame(columns=["codigo","IPI"])
-    
-    def carregar_ipi_itens(caminho="IPI Itens.xlsx"):
-        if os.path.exists(caminho):
-            df = pd.read_excel(caminho, engine="openpyxl",dtype=str)
-            df["SKU"]=df["SKU"].astype(str)
-            df["Valor à Prazo"]=df["Valor à Prazo"].astype(str).str.replace(",",".").astype(float)
-            df["Valor à Vista"]=df["Valor à Vista"].astype(str).str.replace(",",".").astype(float)
-            df["IPI %"]=df["IPI %"].astype(str).str.replace(",",".").astype(float)
-            df.rename(columns={"Descrição Item":"Descrição"}, inplace=True)
-            return df
-        return pd.DataFrame(columns=["SKU","Descrição","Valor à Prazo","Valor à Vista","IPI %"])
-    
-    def carregar_ncm(caminho="ncm_todos.csv"):
-        if os.path.exists(caminho):
-            df=pd.read_csv(caminho,dtype=str)
-            df.rename(columns={df.columns[0]:"codigo", df.columns[1]:"descricao"}, inplace=True)
-            df["codigo"]=df["codigo"].apply(padronizar_codigo)
-            df["descricao"]=df["descricao"].astype(str)
-            return df
-        return pd.DataFrame(columns=["codigo","descricao"])
-    
-    df_tipi = carregar_tipi()
-    df_ipi = carregar_ipi_itens()
-    df_ncm = carregar_ncm()
-    
-    # --- Funções de busca ---
-    def buscar_por_descricao(df, termo, limite=10):
-        termo_norm = normalizar(termo)
-        descricoes_norm = df["Descrição"].apply(normalizar)
-        escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=limite)
-        resultados = []
-        for desc, score, idx in escolhas:
-            resultados.append(df.iloc[idx])
-        return resultados
-    
-    def calcular_preco_final(valor_final_desejado, ipi_percentual, frete=0):
-        base = valor_final_desejado / (1 + ipi_percentual/100)
-        ipi_val = base*ipi_percentual/100
-        valor_final = base+ipi_val+frete
-        return {"valor_base": round(base,2), "ipi":round(ipi_val,2), "frete":round(frete,2), "valor_final":round(valor_final,2)}
-    
-    # --- Interface ---
-    tab1, tab2, tab3 = st.tabs(["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦"])
-    
-    # --- Consulta de SKU ---
-    with tab1:
-        st.subheader("Busca por Título do Produto")
-        termo1 = st.text_input("Digite parte do título do produto:", key="search_sku")
-        if termo1:
-            resultados = buscar_por_descricao(df_ipi, termo1)
-            if resultados:
-                sel1 = st.selectbox("Selecione o produto", [f"{r['Descrição']} | SKU: {r['SKU']}" for r in resultados], key="select_sku")
-                idx1 = [f"{r['Descrição']} | SKU: {r['SKU']}" for r in resultados].index(sel1)
-                item1 = resultados[idx1]
-                st.markdown(f"""
-                **SKU:** {item1['SKU']}  
-                **Descrição:** {item1['Descrição']}  
-                **Valor à Prazo:** R$ {item1['Valor à Prazo']}  
-                **Valor à Vista:** R$ {item1['Valor à Vista']}  
-                **IPI %:** {item1['IPI %']}  
-                """)
-            else:
-                st.warning("Nenhum produto encontrado")
-    
-    # --- Cálculo do IPI ---
-    with tab2:
-        st.subheader("Cálculo do IPI")
-        termo2 = st.text_input("Selecione ou busque o produto:", key="calc_sku")
-        if termo2:
-            resultados = buscar_por_descricao(df_ipi, termo2)
-            if resultados:
-                sel2 = st.selectbox("Selecione o produto", [f"{r['Descrição']} | SKU: {r['SKU']}" for r in resultados], key="select_calc")
-                idx2 = [f"{r['Descrição']} | SKU: {r['SKU']}" for r in resultados].index(sel2)
-                item2 = resultados[idx2]
-                opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo","À Vista"])
-                valor_produto = item2["Valor à Prazo"] if opcao_valor=="À Prazo" else item2["Valor à Vista"]
-                valor_final_input = st.text_input("Digite o valor final desejado (com IPI):", value=str(valor_produto))
-                frete_checkbox = st.checkbox("O item possui frete?")
-                frete_valor = st.number_input("Valor do frete:",min_value=0.0,value=0.0,step=0.1) if frete_checkbox else 0.0
-                if st.button("Calcular IPI", key="btn_calc2"):
-                    try:
-                        valor_final = float(valor_final_input.replace(",","."))
-                        resultado_calc = calcular_preco_final(valor_final, item2["IPI %"], frete_valor)
-                        st.markdown(f"""
-                        **SKU:** {item2['SKU']}  
-                        **Descrição:** {item2['Descrição']}  
-                        **Valor Base (Sem IPI):** R$ {resultado_calc['valor_base']}  
-                        **Frete:** R$ {resultado_calc['frete']}  
-                        **IPI:** R$ {resultado_calc['ipi']}  
-                        **Valor Final (Com IPI):** R$ {resultado_calc['valor_final']}
-                        """)
-                    except:
-                        st.error("Valores inválidos")
-    
-    # --- Consulta NCM/IPI ---
-    with tab3:
-        st.subheader("Consulta NCM/IPI")
-        termo3 = st.text_input("Digite parte da descrição ou código NCM:", key="ncm_search")
-        if termo3:
-            resultados = df_ncm[df_ncm['descricao'].str.contains(termo3, case=False, na=False) | df_ncm['codigo'].str.contains(termo3)]
-            if not resultados.empty:
-                st.table(resultados)
-            else:
-                st.warning("Nenhum NCM encontrado")
+# ==========================
+# --- Painel Admin ---
+# ==========================
+if st.session_state["tipo"]=="admin":
+    st.sidebar.success("Admin logado")
+    admin_menu = st.sidebar.selectbox("Menu Admin", ["Painel", "Gerenciar Usuários"])
+    if admin_menu=="Gerenciar Usuários":
+        st.subheader("Gerenciar Usuários")
+        st.dataframe(df_users)
+        with st.expander("Adicionar Usuário"):
+            new_user = st.text_input("Novo usuário")
+            new_pass = st.text_input("Senha", type="password")
+            tipo_user = st.selectbox("Tipo", ["normal","admin"])
+            dias_val = st.number_input("Dias de validade", min_value=1, max_value=365, value=30)
+            if st.button("Criar usuário"):
+                criar_usuario(new_user,new_pass,tipo_user,dias_val)
+                st.experimental_rerun()
+
+# ==========================
+# --- Aplicação Principal ---
+# ==========================
+st.header(f"Bem-vindo, {st.session_state['user']}")
+
+tabs = st.tabs(["Consulta SKU 🔍", "Cálculo IPI 💰", "Consulta NCM/IPI 📦"])
+
+# A partir daqui podemos adicionar os conteúdos das abas usando as funções já definidas,
+# com pesquisa por similaridade, seleção do item, e apresentação em cards modernos.
+
+st.write("Sistema pronto para consultas e cálculos. Use as abas acima para navegar.")
