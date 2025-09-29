@@ -8,56 +8,53 @@ import xml.etree.ElementTree as ET
 import requests
 
 # ==========================
-# --- Configuração da página ---
+# Configuração da página
 # ==========================
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
 PRIMARY_COLOR = "#4B8BBE"
 CARD_COLOR = "#f9f9f9"
 HIGHLIGHT_COLOR = "#D1E8FF"
 
-st.markdown(
-    f"""
-    <style>
-    .stButton>button {{
-        background-color:{PRIMARY_COLOR};
-        color:white;
-        font-weight:bold;
-        border-radius:10px;
-        padding:10px 20px;
-        margin:5px 0;
-    }}
-    .stRadio>div>div {{flex-direction:row;}}
-    .stTextInput>div>input, .stNumberInput>div>input {{
-        border-radius:10px;
-        padding:10px;
-    }}
-    .stTable {{border-radius:10px; overflow:hidden;}}
-    .card {{
-        background-color:{CARD_COLOR};
-        padding:15px;
-        border-radius:10px;
-        margin-bottom:10px;
-        box-shadow: 1px 1px 5px #ccc;
-    }}
-    .card h4 {{margin:0;}}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown(f"""
+<style>
+.stButton>button {{
+    background-color:{PRIMARY_COLOR};
+    color:white;
+    font-weight:bold;
+    border-radius:10px;
+    padding:10px 20px;
+    margin:5px 0;
+}}
+.stRadio>div>div {{flex-direction:row;}}
+.stTextInput>div>input, .stNumberInput>div>input {{
+    border-radius:10px;
+    padding:10px;
+}}
+.stTable {{border-radius:10px; overflow:hidden;}}
+.card {{
+    background-color:{CARD_COLOR};
+    padding:15px;
+    border-radius:10px;
+    margin-bottom:10px;
+    box-shadow: 1px 1px 5px #ccc;
+}}
+.card h4 {{margin:0;}}
+</style>
+""", unsafe_allow_html=True)
 
 st.title("📦 Dashboard NCM & IPI - Interativo")
 st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
 st.markdown("---")
 
 # ==========================
-# --- Inicialização do session_state ---
+# Session state
 # ==========================
 for key in ["produto_sku", "resultados_sku", "produto_calc", "resultados_calc"]:
     if key not in st.session_state:
         st.session_state[key] = None if "produto" in key else []
 
 # ==========================
-# --- Funções utilitárias ---
+# Funções utilitárias
 # ==========================
 def padronizar_codigo(codigo):
     codigo = str(codigo).replace(".", "").strip()
@@ -72,7 +69,7 @@ def clean_tag(tag):
     return tag.split("}")[-1].lower() if "}" in tag else tag.lower()
 
 # ==========================
-# --- Carregamento de dados ---
+# Carregamento de dados
 # ==========================
 def carregar_tipi(caminho="tipi.xlsx"):
     if os.path.exists(caminho):
@@ -109,7 +106,7 @@ df_ipi = carregar_ipi_itens()
 df_ncm = carregar_ncm()
 
 # ==========================
-# --- Funções principais ---
+# Funções principais
 # ==========================
 def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
     if not os.path.exists(caminho_xml):
@@ -214,7 +211,7 @@ def mostrar_card_produto(item):
     """, unsafe_allow_html=True)
 
 # ==========================
-# --- Interface Streamlit ---
+# Interface Streamlit
 # ==========================
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦", "Análise Inteligente de NCM 🤖"])
 
@@ -280,8 +277,9 @@ elif aba == "Cálculo do IPI 💰":
             if erro_calc: st.error(erro_calc)
             else:
                 st.markdown(f"""
-                <div class='card' style='background-color:{HIGHLIGHT_COLOR}'>
+                <div class='card'>
                 <h4>Resultado do Cálculo</h4>
+                <p><b>SKU:</b> {item.get("SKU","")}</p>
                 <p><b>Valor Base:</b> R$ {resultado['valor_base']}</p>
                 <p><b>Frete:</b> R$ {resultado['frete']}</p>
                 <p><b>IPI:</b> R$ {resultado['ipi']}</p>
@@ -295,7 +293,7 @@ elif aba == "Cálculo do IPI 💰":
 # --------------------------
 elif aba == "Consulta NCM/IPI 📦":
     st.subheader("Consulta NCM/IPI")
-    opcao_busca = st.radio("Tipo de busca:", ["Por código","Por descrição"], horizontal=True)
+    opcao_busca = st.radio("Tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
     if opcao_busca == "Por código":
         codigo_input = st.text_input("Digite o código NCM:")
         if codigo_input:
@@ -307,38 +305,48 @@ elif aba == "Consulta NCM/IPI 📦":
         if termo_input:
             resultados = buscar_por_descricao(df_ncm, termo_input)
             if resultados:
-                df_result = pd.DataFrame(resultados).sort_values(by="similaridade",ascending=False)
+                df_result = pd.DataFrame(resultados).sort_values(by="similaridade", ascending=False)
                 st.table(df_result)
-            else: st.warning("Nenhum resultado encontrado.")
+            else:
+                st.warning("Nenhum resultado encontrado.")
 
 # --------------------------
 # Análise Inteligente de NCM
 # --------------------------
 elif aba == "Análise Inteligente de NCM 🤖":
     st.subheader("Sugerir NCM usando Inteligência Artificial")
-    api_key = st.text_input("Digite sua API Key da Groqk:", type="password", key="groqk_api")
-    titulo_produto = st.text_input("Título do produto para análise de NCM:", key="titulo_ia")
+    api_key = st.text_input("API Key Groqk:", type="password")
+    titulo_produto = st.text_input("Título do produto:")
+    modelo = st.selectbox("Escolha o modelo:", ["openai/gpt-oss-20b", "openai/gpt-4", "openai/gpt-3.5-turbo"], index=0)
     if st.button("Sugerir NCM"):
-        if not api_key: st.error("API Key é obrigatória.")
+        if not api_key: st.error("API Key obrigatória.")
         elif not titulo_produto: st.error("Digite o título do produto.")
         else:
-            def sugerir_ncm_ia(titulo, api_key):
-                prompt = f"""
-                Você é um especialista em classificação fiscal (NCM/HS). 
-                Analise o título do produto: "{titulo}".
-                Retorne até 3 códigos NCM possíveis (8 dígitos) e a descrição mais adequada de cada.
-                """
-                headers = {"Authorization": f"Bearer {api_key}"}
-                data = {"prompt": prompt, "max_tokens": 150}
+            def sugerir_ncm_ia(titulo, api_key, modelo):
+                url = "https://api.groq.com/openai/v1/responses"
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                data = {
+                    "model": modelo,
+                    "input": f"Você é especialista em classificação fiscal (NCM/HS). Analise o título: '{titulo}'. Retorne até 3 códigos NCM possíveis (8 dígitos) e descrição de cada."
+                }
                 try:
-                    response = requests.post("https://api.groqk.com/v1/completions", json=data, headers=headers)
+                    response = requests.post(url, json=data, headers=headers, timeout=30)
                     if response.status_code == 200:
-                        return response.json()["choices"][0]["text"].strip()
-                    else:
-                        return None
-                except Exception as e:
-                    return None
-            ncm_result = sugerir_ncm_ia(titulo_produto, api_key)
-            if not ncm_result: st.error("Erro ao consultar a IA.")
+                        resp_json = response.json()
+                        if "output_text" in resp_json: return resp_json["output_text"].strip()
+                        elif "output" in resp_json and resp_json["output"]:
+                            return resp_json["output"][0]["content"][0]["text"].strip()
+                        else: return None
+                    else: return None
+                except Exception: return None
+
+            ncm_result = sugerir_ncm_ia(titulo_produto, api_key, modelo)
+            if not ncm_result:
+                st.error("Erro ao consultar a IA. Verifique API Key e modelo.")
             else:
-                st.markdown(f"<div class='card' style='background-color:{HIGHLIGHT_COLOR}'><pre>{ncm_result}</pre></div>", unsafe_allow_html=True)
+                st.markdown(f"""
+                <div class='card'>
+                <h4>NCM sugerido pela IA</h4>
+                <pre>{ncm_result}</pre>
+                </div>
+                """, unsafe_allow_html=True)
