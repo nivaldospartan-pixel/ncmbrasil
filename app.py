@@ -13,7 +13,6 @@ import requests
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
 PRIMARY_COLOR = "#4B8BBE"
 CARD_COLOR = "#f9f9f9"
-HIGHLIGHT_COLOR = "#D1E8FF"
 
 st.markdown(f"""
 <style>
@@ -42,8 +41,8 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📦 Dashboard NCM & IPI - Interativo")
-st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
+st.title("📦 Dashboard NCM & IPI - NextSolutions")
+st.markdown("Criado por **Nivaldo Freitas**")
 st.markdown("---")
 
 # ==========================
@@ -67,6 +66,19 @@ def normalizar(texto):
 
 def clean_tag(tag):
     return tag.split("}")[-1].lower() if "}" in tag else tag.lower()
+
+def mostrar_card_produto(item):
+    st.markdown(f"""
+    <div class='card'>
+    <h4>{item.get('Título','Sem título')}</h4>
+    <p>{item.get('Descrição','Sem descrição')}</p>
+    <p><b>SKU:</b> {item.get('SKU','')}</p>
+    <p><b>Valor à Prazo:</b> R$ {item.get('Valor à Prazo',0.0)}</p>
+    <p><b>Valor à Vista:</b> R$ {item.get('Valor à Vista',0.0)}</p>
+    <p><b>NCM:</b> {item.get('NCM','')}</p>
+    <p><b>Link:</b> <a href='{item.get('Link','#')}' target='_blank'>Abrir</a></p>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ==========================
 # Carregamento de dados
@@ -197,156 +209,59 @@ def buscar_por_descricao(df, termo, limite=10):
         })
     return resultados
 
-def mostrar_card_produto(item):
-    st.markdown(f"""
-    <div class='card'>
-    <h4>{item.get('Título','Sem título')}</h4>
-    <p>{item.get('Descrição','Sem descrição')}</p>
-    <p><b>SKU:</b> {item.get('SKU','')}</p>
-    <p><b>Valor à Prazo:</b> R$ {item.get('Valor à Prazo',0.0)}</p>
-    <p><b>Valor à Vista:</b> R$ {item.get('Valor à Vista',0.0)}</p>
-    <p><b>NCM:</b> {item.get('NCM','')}</p>
-    <p><b>Link:</b> <a href='{item.get('Link','#')}' target='_blank'>Abrir</a></p>
-    </div>
-    """, unsafe_allow_html=True)
+# ==========================
+# Funções Groqk
+# ==========================
+def listar_modelos_groqk(api_key):
+    url = "https://api.groq.com/openai/v1/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return [m["id"] for m in data.get("data", [])]
+    except:
+        return []
+
+def groqk_chat_completion(api_key, model, mensagem):
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"model": model, "messages":[{"role":"user","content":mensagem}]}
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+    except:
+        return None
 
 # ==========================
-# Interface Streamlit
+# Menu Streamlit
 # ==========================
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦", "Análise Inteligente de NCM 🤖"])
 
 # --------------------------
-# Consulta de SKU
+# Aba de IA Groqk
 # --------------------------
-if aba == "Consulta de SKU 🔍":
-    st.subheader("Consulta de SKU no XML")
-    metodo = st.radio("Buscar por:", ["Código SKU", "Título do Produto"], horizontal=True)
-    if metodo == "Código SKU":
-        sku_input = st.text_input("Digite o SKU do produto:")
-        if st.button("Buscar por SKU"):
-            if sku_input:
-                item_info, erro = buscar_sku_xml(sku_input)
-                if erro: st.error(erro)
-                else: st.session_state.produto_sku = item_info
-    else:
-        titulo_input = st.text_input("Digite parte do título:")
-        if st.button("Buscar por Título"):
-            if titulo_input:
-                resultados, erro = buscar_por_titulo_xml(titulo_input)
-                if erro: st.error(erro)
-                else: st.session_state.resultados_sku = resultados
-        for item in st.session_state.resultados_sku:
-            if st.button(f"Selecionar: {item['Título']}"):
-                st.session_state.produto_sku = item
-    if st.session_state.produto_sku:
-        mostrar_card_produto(st.session_state.produto_sku)
-
-# --------------------------
-# Cálculo do IPI
-# --------------------------
-elif aba == "Cálculo do IPI 💰":
-    st.subheader("Cálculo do IPI")
-    metodo = st.radio("Buscar por:", ["Código SKU", "Título do Produto"], horizontal=True)
-    if metodo == "Código SKU":
-        sku_calc = st.text_input("Digite o SKU:", key="calc_sku")
-        if st.button("Buscar"):
-            if sku_calc:
-                item_info, erro = buscar_sku_xml(sku_calc)
-                if erro: st.error(erro)
-                else: st.session_state.produto_calc = item_info
-    else:
-        titulo_calc = st.text_input("Digite parte do título:", key="calc_titulo")
-        if st.button("Buscar Produtos"):
-            if titulo_calc:
-                resultados, erro = buscar_por_titulo_xml(titulo_calc)
-                if erro: st.error(erro)
-                else: st.session_state.resultados_calc = resultados
-        for item in st.session_state.resultados_calc:
-            if st.button(f"Selecionar: {item['Título']}"):
-                st.session_state.produto_calc = item
-    if st.session_state.produto_calc:
-        item = st.session_state.produto_calc
-        mostrar_card_produto(item)
-        opcao_valor = st.radio("Escolha o valor:", ["À Prazo", "À Vista"])
-        valor_produto = item.get("Valor à Prazo",0.0) if opcao_valor=="À Prazo" else item.get("Valor à Vista",0.0)
-        valor_final_input = st.number_input("Valor final desejado (com IPI):", value=float(valor_produto))
-        frete_checkbox = st.checkbox("Adicionar frete?")
-        frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
-        if st.button("Calcular IPI"):
-            descricao, resultado, erro_calc = calcular_preco_final(item.get("SKU",""), valor_final_input, frete_valor)
-            if erro_calc: st.error(erro_calc)
-            else:
-                st.markdown(f"""
-                <div class='card'>
-                <h4>Resultado do Cálculo</h4>
-                <p><b>SKU:</b> {item.get("SKU","")}</p>
-                <p><b>Valor Base:</b> R$ {resultado['valor_base']}</p>
-                <p><b>Frete:</b> R$ {resultado['frete']}</p>
-                <p><b>IPI:</b> R$ {resultado['ipi']}</p>
-                <p><b>Valor Final:</b> R$ {resultado['valor_final']}</p>
-                <p><b>Descrição:</b> {descricao}</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-# --------------------------
-# Consulta NCM/IPI
-# --------------------------
-elif aba == "Consulta NCM/IPI 📦":
-    st.subheader("Consulta NCM/IPI")
-    opcao_busca = st.radio("Tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
-    if opcao_busca == "Por código":
-        codigo_input = st.text_input("Digite o código NCM:")
-        if codigo_input:
-            resultado = buscar_por_codigo(df_ncm, codigo_input)
-            if "erro" in resultado: st.warning(resultado["erro"])
-            else: st.table(pd.DataFrame([resultado]))
-    else:
-        termo_input = st.text_input("Digite parte da descrição:")
-        if termo_input:
-            resultados = buscar_por_descricao(df_ncm, termo_input)
-            if resultados:
-                df_result = pd.DataFrame(resultados).sort_values(by="similaridade", ascending=False)
-                st.table(df_result)
-            else:
-                st.warning("Nenhum resultado encontrado.")
-
-# --------------------------
-# Análise Inteligente de NCM
-# --------------------------
-elif aba == "Análise Inteligente de NCM 🤖":
-    st.subheader("Sugerir NCM usando Inteligência Artificial")
+if aba == "Análise Inteligente de NCM 🤖":
+    st.subheader("Sugerir NCM usando Inteligência Artificial (Groqk)")
     api_key = st.text_input("API Key Groqk:", type="password")
+    
+    modelos_disponiveis = []
+    if api_key:
+        modelos_disponiveis = listar_modelos_groqk(api_key)
+        if not modelos_disponiveis:
+            st.warning("API Key inválida ou sem modelos disponíveis.")
+    
+    if modelos_disponiveis:
+        modelo = st.selectbox("Selecione o modelo de IA:", modelos_disponiveis)
+    
     titulo_produto = st.text_input("Título do produto:")
-    modelo = st.selectbox("Escolha o modelo:", ["openai/gpt-oss-20b", "openai/gpt-4", "openai/gpt-3.5-turbo"], index=0)
-    if st.button("Sugerir NCM"):
-        if not api_key: st.error("API Key obrigatória.")
-        elif not titulo_produto: st.error("Digite o título do produto.")
+    
+    if st.button("Sugerir NCM") and api_key and modelos_disponiveis and titulo_produto:
+        mensagem = f"Você é especialista em classificação fiscal (NCM/HS). Analise o título: '{titulo_produto}'. Retorne até 3 códigos NCM possíveis (8 dígitos) e descrição de cada."
+        ncm_result = groqk_chat_completion(api_key, modelo, mensagem)
+        if ncm_result:
+            st.markdown(f"<div class='card'><h4>NCM sugerido pela IA</h4><pre>{ncm_result}</pre></div>", unsafe_allow_html=True)
         else:
-            def sugerir_ncm_ia(titulo, api_key, modelo):
-                url = "https://api.groq.com/openai/v1/responses"
-                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                data = {
-                    "model": modelo,
-                    "input": f"Você é especialista em classificação fiscal (NCM/HS). Analise o título: '{titulo}'. Retorne até 3 códigos NCM possíveis (8 dígitos) e descrição de cada."
-                }
-                try:
-                    response = requests.post(url, json=data, headers=headers, timeout=30)
-                    if response.status_code == 200:
-                        resp_json = response.json()
-                        if "output_text" in resp_json: return resp_json["output_text"].strip()
-                        elif "output" in resp_json and resp_json["output"]:
-                            return resp_json["output"][0]["content"][0]["text"].strip()
-                        else: return None
-                    else: return None
-                except Exception: return None
-
-            ncm_result = sugerir_ncm_ia(titulo_produto, api_key, modelo)
-            if not ncm_result:
-                st.error("Erro ao consultar a IA. Verifique API Key e modelo.")
-            else:
-                st.markdown(f"""
-                <div class='card'>
-                <h4>NCM sugerido pela IA</h4>
-                <pre>{ncm_result}</pre>
-                </div>
-                """, unsafe_allow_html=True)
+            st.error("Erro ao consultar a IA.")
