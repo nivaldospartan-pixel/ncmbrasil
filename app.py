@@ -229,9 +229,8 @@ def buscar_por_descricao(df, termo, limite=10):
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦","Análise Inteligente de NCM 🤖"])
 
 # ==========================
-# Aqui vão todas as abas funcionando
-# ==========================
 # Consulta de SKU 🔍
+# ==========================
 if aba=="Consulta de SKU 🔍":
     st.subheader("Consulta de SKU no XML")
     metodo=st.radio("Buscar por:",["Código SKU","Título do Produto"],horizontal=True)
@@ -267,6 +266,5 @@ if aba=="Consulta de SKU 🔍":
                 st.write(f"{h['Título']} (SKU: {h['SKU']})")
 
 # ==========================
-# Aqui seguem as demais abas (Cálculo do IPI, Consulta NCM/IPI, IA Groqk)
-# As funções de histórico, seleção de modelo e uso de API Key da Groqk já podem ser aplicadas do mesmo modo
-# Para não alongar demais, posso fornecer a continuação completa pronta em outro bloco
+# As demais abas (Cálculo do IPI, Consulta NCM/IPI e IA Groqk) podem ser incluídas abaixo
+# Seguindo a mesma lógica: histórico, cache, cards, API Key para Groqk
