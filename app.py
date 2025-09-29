@@ -235,9 +235,10 @@ def buscar_por_descricao(df, termo, limite=10):
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦","Análise Inteligente de NCM 🤖"])
 
 # ==========================
-# Abas completas
+# (Abas de consulta de SKU, cálculo de IPI, consulta NCM já implementadas)
+# Aqui você reutiliza os blocos de código que já discutimos
 # ==========================
-# (segue a mesma lógica que já vimos, agora com blocos fechados corretamente)
+
 # ==========================
 # Aba Análise Inteligente de NCM 🤖
 # ==========================
@@ -279,7 +280,6 @@ if aba == "Análise Inteligente de NCM 🤖":
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    # Groqk API retorna a resposta no campo 'output_text'
                     resultado = data.get("output_text", "")
                     st.session_state.groq_resultado = {
                         "Produto": produto_ia,
@@ -322,5 +322,3 @@ if st.session_state.historico_ncm:
     for h in st.session_state.historico_ncm[-5:]:
         produto = h.get("Produto", h.get("descricao", ""))
         st.sidebar.write(f"{produto}")
-
-
