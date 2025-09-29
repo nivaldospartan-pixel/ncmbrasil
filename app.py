@@ -158,13 +158,14 @@ def buscar_sku_xml(sku, caminho_xml="GoogleShopping_full.xml"):
         return None, "Erro ao ler o XML."
 
 
-def buscar_por_titulo_xml(titulo, caminho_xml="GoogleShopping_full.xml", limite=5):
+def buscar_por_titulo_xml(titulo, caminho_xml="GoogleShopping_full.xml", limite=10):
     if not os.path.exists(caminho_xml):
         return [], "Arquivo XML não encontrado."
     try:
         tree = ET.parse(caminho_xml)
         root = tree.getroot()
-        resultados = []
+        titulos = []
+        itens = []
         for item in root.iter():
             if item.tag.split("}")[-1] != "item":
                 continue
@@ -179,19 +180,17 @@ def buscar_por_titulo_xml(titulo, caminho_xml="GoogleShopping_full.xml", limite=
                 elif tag == "sale_price": preco_vista = text
                 elif tag == "description": descricao = text
                 elif tag.lower() == "g:ncm" or tag.lower() == "ncm": ncm = text
-            if titulo.lower() in titulo_prod.lower():
-                preco_prazo_val = float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0
-                preco_vista_val = float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else preco_prazo_val
-                resultados.append({
+            if titulo_prod:
+                titulos.append(titulo_prod)
+                itens.append({
                     "SKU": g_id, "Título": titulo_prod, "Link": link,
-                    "Valor à Prazo": preco_prazo_val, "Valor à Vista": preco_vista_val,
+                    "Valor à Prazo": float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0,
+                    "Valor à Vista": float(re.sub(r"[^\d.]", "", preco_vista)) if preco_vista else float(re.sub(r"[^\d.]", "", preco_prazo)) if preco_prazo else 0.0,
                     "Descrição": descricao, "NCM": ncm
                 })
-            if len(resultados) >= limite:
-                break
-        if resultados:
-            return resultados, None
-        return [], "Nenhum produto encontrado com esse título."
+        escolhas = process.extract(titulo, titulos, scorer=fuzz.WRatio, limit=limite)
+        resultados = [itens[idx] for _, _, idx in escolhas]
+        return resultados, None if resultados else ([], "Nenhum produto encontrado.")
     except ET.ParseError:
         return [], "Erro ao ler o XML."
 
@@ -199,7 +198,7 @@ def buscar_por_titulo_xml(titulo, caminho_xml="GoogleShopping_full.xml", limite=
 def calcular_preco_final(sku, valor_final_desejado, frete=0):
     item = df_ipi[df_ipi['SKU'] == str(sku)]
     if item.empty:
-        return None, "SKU não encontrado na planilha IPI Itens."
+        return None, None, "SKU não encontrado na planilha IPI Itens."
     descricao = item['Descrição Item'].values[0]
     ipi_percentual = item['IPI %'].values[0] / 100
     base_calculo = valor_final_desejado / (1 + ipi_percentual)
@@ -258,15 +257,7 @@ with tab1:
                 if erro:
                     st.error(erro)
                 else:
-                    st.markdown(f"""
-                    <div style='background-color:{CARD_COLOR}; padding:20px; border-radius:15px;'>
-                    <h4>{item_info['Título']}</h4>
-                    <p>{item_info['Descrição']}</p>
-                    <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
-                    <p><b>Valor à Prazo:</b> R$ {item_info['Valor à Prazo']}</p>
-                    <p><b>Valor à Vista:</b> R$ {item_info['Valor à Vista']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.json(item_info)
 
     else:  # Busca por título
         titulo_input = st.text_input("Digite parte do título do produto:")
@@ -282,7 +273,6 @@ with tab1:
                         <h4>{item_info['Título']}</h4>
                         <p>{item_info['Descrição']}</p>
                         <p><b>SKU:</b> {item_info['SKU']}</p>
-                        <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
                         <p><b>Valor à Prazo:</b> R$ {item_info['Valor à Prazo']}</p>
                         <p><b>Valor à Vista:</b> R$ {item_info['Valor à Vista']}</p>
                         </div>
@@ -292,41 +282,48 @@ with tab1:
 # --- Cálculo do IPI ---
 with tab2:
     st.subheader("Cálculo do IPI")
-    sku_calc = st.text_input("Digite o SKU para calcular o IPI:", key="calc_sku")
-    if sku_calc:
-        item_info, erro = buscar_sku_xml(sku_calc)
-        if erro:
-            st.error(erro)
-        else:
-            opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo", "À Vista"])
-            valor_produto = item_info["Valor à Prazo"] if opcao_valor == "À Prazo" else item_info["Valor à Vista"]
+    tipo_calc = st.radio("Buscar produto por:", ["SKU", "Título"], horizontal=True)
 
-            valor_final_input = st.text_input("Digite o valor final desejado (com IPI):", value=str(valor_produto))
-            frete_checkbox = st.checkbox("O item possui frete?")
-            frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
+    if tipo_calc == "SKU":
+        sku_calc = st.text_input("Digite o SKU para calcular o IPI:", key="calc_sku")
+        produto_selecionado = None
+        if sku_calc:
+            produto_selecionado, erro = buscar_sku_xml(sku_calc)
+            if erro:
+                st.error(erro)
+    else:
+        titulo_calc = st.text_input("Digite parte do título para calcular:")
+        produto_selecionado = None
+        if st.button("Buscar Produto por Título"):
+            if titulo_calc:
+                resultados, erro = buscar_por_titulo_xml(titulo_calc)
+                if erro:
+                    st.error(erro)
+                else:
+                    opcoes = [f"{r['Título']} (SKU: {r['SKU']})" for r in resultados]
+                    escolha = st.selectbox("Selecione o produto:", opcoes)
+                    if escolha:
+                        idx = opcoes.index(escolha)
+                        produto_selecionado = resultados[idx]
 
-            if st.button("Calcular IPI", key="btn_calc"):
-                try:
-                    valor_final = float(valor_final_input.replace(",", "."))
-                    descricao, resultado, erro_calc = calcular_preco_final(sku_calc, valor_final, frete_valor)
-                    if erro_calc:
-                        st.error(erro_calc)
-                    else:
-                        st.markdown(f"""
-                        <div style='background-color:{CARD_COLOR}; padding:20px; border-radius:15px;'>
-                        <h4>Resultado do Cálculo</h4>
-                        <p><b>SKU:</b> {sku_calc}</p>
-                        <p><b>Valor Selecionado:</b> R$ {valor_produto}</p>
-                        <p><b>Valor Base (Sem IPI):</b> R$ {resultado['valor_base']}</p>
-                        <p><b>Frete:</b> R$ {resultado['frete']}</p>
-                        <p><b>IPI:</b> R$ {resultado['ipi']}</p>
-                        <p><b>Valor Final (Com IPI e Frete):</b> R$ {resultado['valor_final']}</p>
-                        <p><b>Descrição:</b> {descricao}</p>
-                        <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                except ValueError:
-                    st.error("Valores inválidos. Use apenas números para valor final e frete.")
+    if produto_selecionado:
+        opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo", "À Vista"])
+        valor_produto = produto_selecionado["Valor à Prazo"] if opcao_valor == "À Prazo" else produto_selecionado["Valor à Vista"]
+
+        valor_final_input = st.text_input("Digite o valor final desejado (com IPI):", value=str(valor_produto))
+        frete_checkbox = st.checkbox("O item possui frete?")
+        frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
+
+        if st.button("Calcular IPI", key="btn_calc"):
+            try:
+                valor_final = float(valor_final_input.replace(",", "."))
+                descricao, resultado, erro_calc = calcular_preco_final(produto_selecionado["SKU"], valor_final, frete_valor)
+                if erro_calc:
+                    st.error(erro_calc)
+                else:
+                    st.json({"Produto": produto_selecionado["Título"], "Resultado": resultado})
+            except ValueError:
+                st.error("Valores inválidos. Use apenas números para valor final e frete.")
 
 
 # --- Consulta NCM/IPI ---
@@ -339,17 +336,10 @@ with tab3:
         if st.button("Buscar NCM por Código"):
             if codigo_input:
                 resultado = buscar_por_codigo(df_ncm, codigo_input)
-                if "erro" in resultado:
-                    st.warning(resultado["erro"])
-                else:
-                    st.table(pd.DataFrame([resultado]))
+                st.json(resultado)
     else:
         termo_input = st.text_input("Digite parte da descrição:", key="ncm_desc")
         if st.button("Buscar NCM por Descrição"):
             if termo_input:
                 resultados = buscar_por_descricao(df_ncm, termo_input)
-                if resultados:
-                    df_result = pd.DataFrame(resultados).sort_values(by="similaridade", ascending=False)
-                    st.table(df_result)
-                else:
-                    st.warning("Nenhum resultado encontrado.")
+                st.dataframe(pd.DataFrame(resultados).sort_values(by="similaridade", ascending=False))
