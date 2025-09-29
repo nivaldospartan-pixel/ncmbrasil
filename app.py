@@ -47,18 +47,6 @@ def normalizar(texto):
     texto = re.sub(r"[^a-z0-9\s]"," ",texto)
     return re.sub(r"\s+"," ",texto)
 
-def buscar_por_descricao(df,termo,limite=10):
-    termo_norm = normalizar(termo)
-    descricoes_norm = df["descricao"].apply(normalizar)
-    escolhas = process.extract(termo_norm,descricoes_norm,scorer=fuzz.WRatio,limit=limite)
-    resultados = []
-    for desc,score,idx in escolhas:
-        codigo = df.loc[idx,"codigo"]
-        ipi_val = df_tipi[df_tipi["codigo"]==codigo]["IPI"].values
-        ipi_val = ipi_val[0] if len(ipi_val)>0 else "NT"
-        resultados.append({"codigo":codigo,"descricao":df.loc[idx,"descricao"],"IPI":ipi_val,"similaridade":round(score,2)})
-    return resultados
-
 # -----------------------------
 # Carregamento de dados NCM/IPI
 # -----------------------------
@@ -88,6 +76,43 @@ except:
     df_ipi = pd.DataFrame(columns=["SKU","Descrição Item","Valor à Prazo","Valor à Vista","IPI %"])
 
 # -----------------------------
+# Funções de busca
+# -----------------------------
+def buscar_por_descricao(df,termo,limite=10):
+    termo_norm = normalizar(termo)
+    descricoes_norm = df["Descrição Item"].apply(normalizar)
+    escolhas = process.extract(termo_norm,descricoes_norm,scorer=fuzz.WRatio,limit=limite)
+    resultados = []
+    for desc,score,idx in escolhas:
+        sku = df.loc[idx,"SKU"]
+        descricao = df.loc[idx,"Descrição Item"]
+        valor_prazo = df.loc[idx,"Valor à Prazo"]
+        valor_vista = df.loc[idx,"Valor à Vista"]
+        ipi_percent = df.loc[idx,"IPI %"]
+        resultados.append({
+            "SKU": sku,
+            "Descrição": descricao,
+            "Valor à Prazo": valor_prazo,
+            "Valor à Vista": valor_vista,
+            "IPI %": ipi_percent,
+            "similaridade": round(score,2)
+        })
+    return resultados
+
+def calcular_preco_final(valor_final_desejado, ipi_percentual, frete=0):
+    ipi_percentual = ipi_percentual / 100
+    base_calculo = valor_final_desejado / (1 + ipi_percentual)
+    valor_total = base_calculo + frete
+    ipi_valor = valor_total * ipi_percentual
+    valor_final = valor_total + ipi_valor
+    return {
+        "valor_base": round(base_calculo,2),
+        "frete": round(frete,2),
+        "ipi": round(ipi_valor,2),
+        "valor_final": round(valor_final,2)
+    }
+
+# -----------------------------
 # Streamlit App
 # -----------------------------
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
@@ -101,6 +126,9 @@ body {background-color: #121212; color:#E0E0E0;}
 st.title("📦 Dashboard NCM & IPI")
 st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
 
+# -----------------------------
+# Primeiro Admin
+# -----------------------------
 if df_users.empty or (df_users['tipo']=="admin").sum()==0:
     st.subheader("Cadastro do primeiro Admin")
     username = st.text_input("Usuário")
@@ -114,9 +142,16 @@ if df_users.empty or (df_users['tipo']=="admin").sum()==0:
         else:
             pw_hash = hash_password(password)
             hoje = datetime.date.today().isoformat()
-            df_users = df_users.append({"username":username,"password_hash":pw_hash,"tipo":"admin",
-                                        "data_inicio":hoje,"data_fim":(datetime.date.today()+datetime.timedelta(days=365)).isoformat(),
-                                        "ultimo_acesso":"","groqk_key":""},ignore_index=True)
+            novo_admin = pd.DataFrame([{
+                "username": username,
+                "password_hash": pw_hash,
+                "tipo": "admin",
+                "data_inicio": hoje,
+                "data_fim": (datetime.date.today() + datetime.timedelta(days=365)).isoformat(),
+                "ultimo_acesso": "",
+                "groqk_key": ""
+            }])
+            df_users = pd.concat([df_users, novo_admin], ignore_index=True)
             df_users.to_csv(db_users_file,index=False)
             st.success("Admin criado com sucesso! Faça login agora.")
             st.experimental_rerun()
@@ -147,17 +182,51 @@ else:
             st.session_state.logged_in = False
             st.experimental_rerun()
 
-        # Dashboard tabs
+        # -----------------------------
+        # Dashboard Tabs
+        # -----------------------------
         tab1, tab2 = st.tabs(["Consulta SKU 🔍","Cálculo de IPI 💰"])
+
         with tab1:
             st.subheader("Consulta de SKU por título")
             termo = st.text_input("Digite parte do título do produto:")
             if termo:
-                resultados = buscar_por_descricao(df_ipi,termo,limite=10)
+                resultados = buscar_por_descricao(df_ipi, termo, limite=10)
                 if resultados:
-                    sel = st.selectbox("Selecione o produto",[f"{r['descricao']} | SKU: {r['codigo']}" for r in resultados])
-                    idx = [f"{r['descricao']} | SKU: {r['codigo']}" for r in resultados].index(sel)
+                    sel = st.selectbox("Selecione o produto", [f"{r['Descrição']} | SKU: {r['SKU']}" for r in resultados])
+                    idx = [f"{r['Descrição']} | SKU: {r['SKU']}" for r in resultados].index(sel)
                     item = resultados[idx]
-                    st.markdown(f"**Descrição:** {item['descricao']}  |  **IPI:** {item['IPI']}%  | SKU: {item['codigo']}")
-                else:
-                    st.warning("Nenhum produto encontrado.")
+                    st.markdown(f"**Descrição:** {item['Descrição']}")
+                    st.markdown(f"**SKU:** {item['SKU']}")
+                    st.markdown(f"**IPI %:** {item['IPI %']}%")
+                    st.markdown(f"**Valor à Prazo:** R$ {item['Valor à Prazo']}")
+                    st.markdown(f"**Valor à Vista:** R$ {item['Valor à Vista']}")
+
+        with tab2:
+            st.subheader("Cálculo do IPI")
+            termo2 = st.text_input("Selecione ou busque o produto para cálculo:", key="calc_sku")
+            if termo2:
+                resultados = buscar_por_descricao(df_ipi, termo2, limite=10)
+                if resultados:
+                    sel2 = st.selectbox("Selecione o produto", [f"{r['Descrição']} | SKU: {r['SKU']}" for r in resultados], key="select_calc")
+                    idx2 = [f"{r['Descrição']} | SKU: {r['SKU']}" for r in resultados].index(sel2)
+                    item2 = resultados[idx2]
+                    opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo","À Vista"])
+                    valor_produto = item2["Valor à Prazo"] if opcao_valor=="À Prazo" else item2["Valor à Vista"]
+                    valor_final_input = st.text_input("Digite o valor final desejado (com IPI):", value=str(valor_produto))
+                    frete_checkbox = st.checkbox("O item possui frete?")
+                    frete_valor = st.number_input("Valor do frete:",min_value=0.0,value=0.0,step=0.1) if frete_checkbox else 0.0
+                    if st.button("Calcular IPI", key="btn_calc2"):
+                        try:
+                            valor_final = float(valor_final_input.replace(",","."))
+                            resultado_calc = calcular_preco_final(valor_final, item2["IPI %"], frete_valor)
+                            st.markdown(f"""
+                            **SKU:** {item2['SKU']}  
+                            **Descrição:** {item2['Descrição']}  
+                            **Valor Base (Sem IPI):** R$ {resultado_calc['valor_base']}  
+                            **Frete:** R$ {resultado_calc['frete']}  
+                            **IPI:** R$ {resultado_calc['ipi']}  
+                            **Valor Final (Com IPI):** R$ {resultado_calc['valor_final']}
+                            """)
+                        except:
+                            st.error("Valores inválidos")
