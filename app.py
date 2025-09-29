@@ -235,8 +235,124 @@ def buscar_por_descricao(df, termo, limite=10):
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦","Análise Inteligente de NCM 🤖"])
 
 # ==========================
-# Funções das abas completas
+# Abas completas
 # ==========================
-# (Consulta de SKU, Cálculo do IPI, Consulta NCM, Análise Groqk)
-# A implementação completa das abas segue a continuação que já foi enviada anteriormente,
-# incluindo histórico, valores à vista/prazo corretos, inputs visíveis e API Groqk.
+
+# --- Consulta de SKU ---
+if aba == "Consulta de SKU 🔍":
+    st.subheader("Consulta de SKU no XML")
+    metodo = st.radio("Buscar por:", ["Código SKU", "Título do Produto"], horizontal=True)
+    if metodo == "Código SKU":
+        sku_input = st.text_input("Digite o SKU do produto:", key="sku_input")
+        if st.button("Buscar SKU"):
+            if sku_input:
+                item, erro = buscar_sku_cache(sku_input)
+                if erro:
+                    st.error(erro)
+                else:
+                    st.session_state.produto_sku = item
+                    st.session_state.historico_sku.append(item)
+    else:
+        titulo_input = st.text_input("Digite parte do título:", key="titulo_input")
+        if st.button("Buscar Título"):
+            if titulo_input:
+                resultados, erro = buscar_titulo_cache(titulo_input)
+                if erro:
+                    st.error(erro)
+                else:
+                    st.session_state.resultados_sku = resultados
+
+        if st.session_state.resultados_sku:
+            opcoes = [f"{r['Título']} (SKU: {r['SKU']})" for r in st.session_state.resultados_sku]
+            escolha = st.selectbox("Selecione o produto:", opcoes)
+            if st.button("Selecionar Produto"):
+                idx = opcoes.index(escolha)
+                st.session_state.produto_sku = st.session_state.resultados_sku[idx]
+                st.session_state.historico_sku.append(st.session_state.produto_sku)
+
+    if st.session_state.produto_sku:
+        mostrar_card_produto(st.session_state.produto_sku)
+
+# --- Cálculo do IPI ---
+elif aba == "Cálculo do IPI 💰":
+    st.subheader("Cálculo do IPI")
+    metodo = st.radio("Buscar por:", ["Código SKU", "Título do Produto"], horizontal=True)
+    if metodo == "Código SKU":
+        sku_calc = st.text_input("Digite o SKU:", key="calc_sku")
+        if st.button("Buscar SKU para cálculo"):
+            if sku_calc:
+                item, erro = buscar_sku_cache(sku_calc)
+                if erro:
+                    st.error(erro)
+                else:
+                    st.session_state.produto_calc = item
+                    st.session_state.historico_calc.append(item)
+    else:
+        titulo_calc = st.text_input("Digite parte do título:", key="calc_titulo")
+        if st.button("Buscar Título para cálculo"):
+            if titulo_calc:
+                resultados, erro = buscar_titulo_cache(titulo_calc)
+                if erro:
+                    st.error(erro)
+                else:
+                    st.session_state.resultados_calc = resultados
+        if st.session_state.resultados_calc:
+            opcoes = [f"{r['Título']} (SKU: {r['SKU']})" for r in st.session_state.resultados_calc]
+            escolha = st.selectbox("Selecione o produto:", opcoes)
+            if st.button("Selecionar Produto para cálculo"):
+                idx = opcoes.index(escolha)
+                st.session_state.produto_calc = st.session_state.resultados_calc[idx]
+                st.session_state.historico_calc.append(st.session_state.produto_calc)
+
+    if st.session_state.produto_calc:
+        item_info = st.session_state.produto_calc
+        opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo","À Vista"])
+        valor_produto = item_info["Valor à Prazo"] if opcao_valor=="À Prazo" else item_info["Valor à Vista"]
+        valor_final_input = st.text_input("Digite o valor final desejado (com IPI):", value=str(valor_produto))
+        frete_checkbox = st.checkbox("O item possui frete?")
+        frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
+        if st.button("Calcular IPI"):
+            try:
+                valor_final = float(valor_final_input.replace(",","."))
+                descricao, resultado, erro_calc = calcular_preco_final(item_info["SKU"], valor_final, frete_valor)
+                if erro_calc:
+                    st.error(erro_calc)
+                else:
+                    st.markdown(f"""
+                    <div class='card'>
+                    <h4>Resultado do Cálculo</h4>
+                    <p><b>SKU:</b> {item_info.get('SKU','')}</p>
+                    <p><b>Valor Selecionado:</b> {format_moeda(valor_produto)}</p>
+                    <p><b>Valor Base (Sem IPI):</b> {format_moeda(resultado['valor_base'])}</p>
+                    <p><b>Frete:</b> {format_moeda(resultado['frete'])}</p>
+                    <p><b>IPI:</b> {format_moeda(resultado['ipi'])}</p>
+                    <p><b>Valor Final (Com IPI e Frete):</b> {format_moeda(resultado['valor_final'])}</p>
+                    <p><b>Descrição:</b> {descricao}</p>
+                    <p><b>Link:</b> <a href='{item_info.get('Link','#')}' target='_blank'>Abrir</a></p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+# --- Consulta NCM/IPI ---
+elif aba == "Consulta NCM/IPI 📦":
+    st.subheader("Consulta NCM/IPI")
+    opcao_busca = st.radio("Tipo de busca:", ["Por código","Por descrição"], horizontal=True)
+    if opcao_busca=="Por código":
+        codigo_input = st.text_input("Digite o código NCM:", key="ncm_codigo")
+        if codigo_input:
+            resultado = buscar_por_codigo(df_ncm, codigo_input)
+            if "erro" in resultado:
+                st.warning(resultado["erro"])
+            else:
+                st.session_state.historico_ncm.append(resultado)
+                st.table(pd.DataFrame([resultado]))
+    else:
+        termo_input = st.text_input("Digite parte da descrição:", key="ncm_desc")
+        if termo_input:
+            resultados = buscar_por_descricao(df_ncm, termo_input)
+            if resultados:
+                df_result = pd.DataFrame(resultados).sort_values(by="similaridade", ascending=False)
+                st.session_state.historico_ncm.extend(resultados)
+                st.table(df_result)
+            else:
+                st.warning("Nenhum resultado encontrado.")
+
