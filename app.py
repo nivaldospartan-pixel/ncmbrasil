@@ -210,32 +210,6 @@ def buscar_por_descricao(df, termo, limite=10):
     return resultados
 
 # ==========================
-# Funções Groqk
-# ==========================
-def listar_modelos_groqk(api_key):
-    url = "https://api.groq.com/openai/v1/models"
-    headers = {"Authorization": f"Bearer {api_key}"}
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return [m["id"] for m in data.get("data", [])]
-    except:
-        return []
-
-def groqk_chat_completion(api_key, model, mensagem):
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {"model": model, "messages":[{"role":"user","content":mensagem}]}
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
-    except:
-        return None
-
-# ==========================
 # Menu Streamlit
 # ==========================
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦", "Análise Inteligente de NCM 🤖"])
@@ -245,23 +219,56 @@ aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍", "Cálculo do IPI �
 # --------------------------
 if aba == "Análise Inteligente de NCM 🤖":
     st.subheader("Sugerir NCM usando Inteligência Artificial (Groqk)")
-    api_key = st.text_input("API Key Groqk:", type="password")
-    
+
+    api_key = st.text_input("API Key Groqk:", type="password").strip()
     modelos_disponiveis = []
+    modelo = None
+
     if api_key:
-        modelos_disponiveis = listar_modelos_groqk(api_key)
-        if not modelos_disponiveis:
-            st.warning("API Key inválida ou sem modelos disponíveis.")
-    
-    if modelos_disponiveis:
-        modelo = st.selectbox("Selecione o modelo de IA:", modelos_disponiveis)
-    
+        try:
+            url_modelos = "https://api.groq.com/openai/v1/models"
+            headers = {"Authorization": f"Bearer {api_key}"}
+            resp = requests.get(url_modelos, headers=headers, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            modelos_disponiveis = [m["id"] for m in data.get("data", [])]
+            if modelos_disponiveis:
+                modelo = st.selectbox("Selecione o modelo de IA:", modelos_disponiveis)
+            else:
+                st.warning("Nenhum modelo disponível para essa API Key.")
+        except requests.exceptions.RequestException as e:
+            st.error(f"Erro ao listar modelos: {e}")
+
     titulo_produto = st.text_input("Título do produto:")
-    
-    if st.button("Sugerir NCM") and api_key and modelos_disponiveis and titulo_produto:
-        mensagem = f"Você é especialista em classificação fiscal (NCM/HS). Analise o título: '{titulo_produto}'. Retorne até 3 códigos NCM possíveis (8 dígitos) e descrição de cada."
-        ncm_result = groqk_chat_completion(api_key, modelo, mensagem)
-        if ncm_result:
-            st.markdown(f"<div class='card'><h4>NCM sugerido pela IA</h4><pre>{ncm_result}</pre></div>", unsafe_allow_html=True)
+
+    if st.button("Sugerir NCM"):
+        if not api_key:
+            st.error("API Key obrigatória.")
+        elif not modelos_disponiveis:
+            st.error("Nenhum modelo disponível. Verifique sua API Key.")
+        elif not titulo_produto:
+            st.error("Digite o título do produto.")
         else:
-            st.error("Erro ao consultar a IA.")
+            mensagem = (
+                f"Você é especialista em classificação fiscal (NCM/HS). "
+                f"Analise o título: '{titulo_produto}'. "
+                f"Retorne até 3 códigos NCM possíveis (8 dígitos) e a descrição de cada."
+            )
+            try:
+                url_chat = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                payload = {"model": modelo, "messages":[{"role":"user","content":mensagem}]}
+
+                response = requests.post(url_chat, json=payload, headers=headers, timeout=30)
+                response.raise_for_status()
+                result = response.json()
+
+                if "choices" in result and result["choices"]:
+                    conteudo = result["choices"][0]["message"]["content"]
+                    st.markdown(f"<div class='card'><h4>NCM sugerido pela IA</h4><pre>{conteudo}</pre></div>", unsafe_allow_html=True)
+                else:
+                    st.error("A IA retornou resposta vazia.")
+            except requests.exceptions.RequestException as e:
+                st.error(f"Erro ao chamar a IA: {e}")
+            except Exception as e:
+                st.error(f"Erro inesperado: {e}")
