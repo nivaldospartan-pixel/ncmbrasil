@@ -215,9 +215,135 @@ def buscar_por_descricao(df, termo, limite=10):
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦", "Análise Inteligente de NCM 🤖"])
 
 # --------------------------
+# Consulta de SKU
+# --------------------------
+if aba == "Consulta de SKU 🔍":
+    st.subheader("Consulta de SKU no XML")
+    metodo = st.radio("Buscar por:", ["Código SKU", "Título do Produto"], horizontal=True)
+
+    if metodo == "Código SKU":
+        sku_input = st.text_input("Digite o SKU do produto:")
+        if st.button("Buscar por SKU"):
+            if sku_input:
+                item_info, erro = buscar_sku_xml(sku_input)
+                if erro:
+                    st.error(erro)
+                else:
+                    st.session_state.produto_sku = item_info
+
+    else:
+        titulo_input = st.text_input("Digite parte do título:")
+        if st.button("Buscar por Título"):
+            if titulo_input:
+                resultados, erro = buscar_por_titulo_xml(titulo_input)
+                if erro:
+                    st.error(erro)
+                else:
+                    st.session_state.resultados_sku = resultados
+
+        if st.session_state.resultados_sku:
+            opcoes = [f"{r['Título']} (SKU: {r['SKU']})" for r in st.session_state.resultados_sku]
+            escolha = st.selectbox("Selecione o produto:", opcoes, key="escolha_sku")
+            if st.button("Selecionar Produto"):
+                idx = opcoes.index(escolha)
+                st.session_state.produto_sku = st.session_state.resultados_sku[idx]
+
+    if st.session_state.produto_sku:
+        mostrar_card_produto(st.session_state.produto_sku)
+
+# --------------------------
+# Cálculo do IPI
+# --------------------------
+elif aba == "Cálculo do IPI 💰":
+    st.subheader("Cálculo do IPI")
+    metodo = st.radio("Buscar por:", ["Código SKU", "Título do Produto"], horizontal=True)
+
+    if metodo == "Código SKU":
+        sku_calc = st.text_input("Digite o SKU para calcular o IPI:", key="calc_sku")
+        if st.button("Buscar por SKU", key="buscar_calc_sku"):
+            if sku_calc:
+                item_info, erro = buscar_sku_xml(sku_calc)
+                if erro:
+                    st.error(erro)
+                else:
+                    st.session_state.produto_calc = item_info
+
+    else:
+        titulo_calc = st.text_input("Digite parte do título:", key="calc_titulo")
+        if st.button("Buscar Produtos por Título"):
+            if titulo_calc:
+                resultados, erro = buscar_por_titulo_xml(titulo_calc)
+                if erro:
+                    st.error(erro)
+                else:
+                    st.session_state.resultados_calc = resultados
+
+        if st.session_state.resultados_calc:
+            opcoes = [f"{r['Título']} (SKU: {r['SKU']})" for r in st.session_state.resultados_calc]
+            escolha = st.selectbox("Selecione o produto:", opcoes, key="escolha_calc")
+            if st.button("Selecionar para Cálculo"):
+                idx = opcoes.index(escolha)
+                st.session_state.produto_calc = st.session_state.resultados_calc[idx]
+
+    if st.session_state.produto_calc:
+        item_info = st.session_state.produto_calc
+        opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo", "À Vista"])
+        valor_produto = item_info.get("Valor à Prazo", 0.0) if opcao_valor == "À Prazo" else item_info.get("Valor à Vista", 0.0)
+        valor_final_input = st.text_input("Digite o valor final desejado (com IPI):", value=str(valor_produto))
+        frete_checkbox = st.checkbox("O item possui frete?")
+        frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
+
+        if st.button("Calcular IPI", key="btn_calc"):
+            try:
+                valor_final = float(valor_final_input.replace(",", "."))
+                descricao, resultado, erro_calc = calcular_preco_final(item_info.get("SKU", ""), valor_final, frete_valor)
+                if erro_calc:
+                    st.error(erro_calc)
+                else:
+                    st.markdown(f"""
+                    <div class='card'>
+                    <h4>Resultado do Cálculo</h4>
+                    <p><b>SKU:</b> {item_info.get("SKU", "")}</p>
+                    <p><b>Valor Selecionado:</b> R$ {valor_produto}</p>
+                    <p><b>Valor Base (Sem IPI):</b> R$ {resultado['valor_base']}</p>
+                    <p><b>Frete:</b> R$ {resultado['frete']}</p>
+                    <p><b>IPI:</b> R$ {resultado['ipi']}</p>
+                    <p><b>Valor Final (Com IPI e Frete):</b> R$ {resultado['valor_final']}</p>
+                    <p><b>Descrição:</b> {descricao}</p>
+                    <p><b>Link:</b> <a href='{item_info.get('Link', '#')}' target='_blank'>{item_info.get('Link', 'Sem link')}</a></p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            except ValueError:
+                st.error("Valores inválidos. Use apenas números para valor final e frete.")
+
+# --------------------------
+# Consulta NCM/IPI
+# --------------------------
+elif aba == "Consulta NCM/IPI 📦":
+    st.subheader("Consulta NCM/IPI")
+    opcao_busca = st.radio("Tipo de busca:", ["Por código", "Por descrição"], horizontal=True)
+    if opcao_busca == "Por código":
+        codigo_input = st.text_input("Digite o código NCM:", key="ncm_codigo")
+        if codigo_input:
+            resultado = buscar_por_codigo(df_ncm, codigo_input)
+            if "erro" in resultado:
+                st.warning(resultado["erro"])
+            else:
+                st.table(pd.DataFrame([resultado]))
+    else:
+        termo_input = st.text_input("Digite parte da descrição:", key="ncm_desc")
+        if termo_input:
+            resultados = buscar_por_descricao(df_ncm, termo_input)
+            if resultados:
+                df_result = pd.DataFrame(resultados).sort_values(by="similaridade", ascending=False)
+                st.table(df_result)
+            else:
+                st.warning("Nenhum resultado encontrado.")
+
+# --------------------------
 # Aba de IA Groqk
 # --------------------------
-if aba == "Análise Inteligente de NCM 🤖":
+elif aba == "Análise Inteligente de NCM 🤖":
     st.subheader("Sugerir NCM usando Inteligência Artificial (Groqk)")
 
     api_key = st.text_input("API Key Groqk:", type="password").strip()
