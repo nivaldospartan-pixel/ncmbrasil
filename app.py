@@ -5,6 +5,7 @@ import unidecode
 import re
 import os
 import xml.etree.ElementTree as ET
+import requests
 
 # ==========================
 # --- Configuração da página ---
@@ -199,9 +200,6 @@ def buscar_por_descricao(df, termo, limite=10):
         })
     return resultados
 
-# ==========================
-# --- Função para mostrar card de produto ---
-# ==========================
 def mostrar_card_produto(item):
     st.markdown(f"""
     <div class='card'>
@@ -218,13 +216,14 @@ def mostrar_card_produto(item):
 # ==========================
 # --- Interface Streamlit ---
 # ==========================
-aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦"])
+aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍", "Cálculo do IPI 💰", "Consulta NCM/IPI 📦", "Análise Inteligente de NCM 🤖"])
 
-# --- Consulta de SKU ---
+# --------------------------
+# Consulta de SKU
+# --------------------------
 if aba == "Consulta de SKU 🔍":
     st.subheader("Consulta de SKU no XML")
     metodo = st.radio("Buscar por:", ["Código SKU", "Título do Produto"], horizontal=True)
-
     if metodo == "Código SKU":
         sku_input = st.text_input("Digite o SKU do produto:")
         if st.button("Buscar por SKU"):
@@ -242,15 +241,15 @@ if aba == "Consulta de SKU 🔍":
         for item in st.session_state.resultados_sku:
             if st.button(f"Selecionar: {item['Título']}"):
                 st.session_state.produto_sku = item
-
     if st.session_state.produto_sku:
         mostrar_card_produto(st.session_state.produto_sku)
 
-# --- Cálculo do IPI ---
+# --------------------------
+# Cálculo do IPI
+# --------------------------
 elif aba == "Cálculo do IPI 💰":
     st.subheader("Cálculo do IPI")
     metodo = st.radio("Buscar por:", ["Código SKU", "Título do Produto"], horizontal=True)
-
     if metodo == "Código SKU":
         sku_calc = st.text_input("Digite o SKU:", key="calc_sku")
         if st.button("Buscar"):
@@ -268,7 +267,6 @@ elif aba == "Cálculo do IPI 💰":
         for item in st.session_state.resultados_calc:
             if st.button(f"Selecionar: {item['Título']}"):
                 st.session_state.produto_calc = item
-
     if st.session_state.produto_calc:
         item = st.session_state.produto_calc
         mostrar_card_produto(item)
@@ -277,7 +275,6 @@ elif aba == "Cálculo do IPI 💰":
         valor_final_input = st.number_input("Valor final desejado (com IPI):", value=float(valor_produto))
         frete_checkbox = st.checkbox("Adicionar frete?")
         frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
-
         if st.button("Calcular IPI"):
             descricao, resultado, erro_calc = calcular_preco_final(item.get("SKU",""), valor_final_input, frete_valor)
             if erro_calc: st.error(erro_calc)
@@ -293,7 +290,9 @@ elif aba == "Cálculo do IPI 💰":
                 </div>
                 """, unsafe_allow_html=True)
 
-# --- Consulta NCM/IPI ---
+# --------------------------
+# Consulta NCM/IPI
+# --------------------------
 elif aba == "Consulta NCM/IPI 📦":
     st.subheader("Consulta NCM/IPI")
     opcao_busca = st.radio("Tipo de busca:", ["Por código","Por descrição"], horizontal=True)
@@ -311,3 +310,35 @@ elif aba == "Consulta NCM/IPI 📦":
                 df_result = pd.DataFrame(resultados).sort_values(by="similaridade",ascending=False)
                 st.table(df_result)
             else: st.warning("Nenhum resultado encontrado.")
+
+# --------------------------
+# Análise Inteligente de NCM
+# --------------------------
+elif aba == "Análise Inteligente de NCM 🤖":
+    st.subheader("Sugerir NCM usando Inteligência Artificial")
+    api_key = st.text_input("Digite sua API Key da Groqk:", type="password", key="groqk_api")
+    titulo_produto = st.text_input("Título do produto para análise de NCM:", key="titulo_ia")
+    if st.button("Sugerir NCM"):
+        if not api_key: st.error("API Key é obrigatória.")
+        elif not titulo_produto: st.error("Digite o título do produto.")
+        else:
+            def sugerir_ncm_ia(titulo, api_key):
+                prompt = f"""
+                Você é um especialista em classificação fiscal (NCM/HS). 
+                Analise o título do produto: "{titulo}".
+                Retorne até 3 códigos NCM possíveis (8 dígitos) e a descrição mais adequada de cada.
+                """
+                headers = {"Authorization": f"Bearer {api_key}"}
+                data = {"prompt": prompt, "max_tokens": 150}
+                try:
+                    response = requests.post("https://api.groqk.com/v1/completions", json=data, headers=headers)
+                    if response.status_code == 200:
+                        return response.json()["choices"][0]["text"].strip()
+                    else:
+                        return None
+                except Exception as e:
+                    return None
+            ncm_result = sugerir_ncm_ia(titulo_produto, api_key)
+            if not ncm_result: st.error("Erro ao consultar a IA.")
+            else:
+                st.markdown(f"<div class='card' style='background-color:{HIGHLIGHT_COLOR}'><pre>{ncm_result}</pre></div>", unsafe_allow_html=True)
