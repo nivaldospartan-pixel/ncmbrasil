@@ -1,17 +1,17 @@
 import streamlit as st
 import pandas as pd
 from rapidfuzz import process, fuzz
-import unidecode, re, os, xml.etree.ElementTree as ET
-from datetime import datetime, date
-import hashlib
+import unidecode
+import re
+import os
+import xml.etree.ElementTree as ET
 import json
-import requests
+from datetime import datetime
 
-# -----------------------------
-# --- Configuração da página ---
-# -----------------------------
+# ==========================
+# --- Configuração página ---
+# ==========================
 st.set_page_config(page_title="Dashboard NCM & IPI", layout="wide", page_icon="📦")
-
 st.markdown("""
 <style>
 .stButton>button {background-color:#4B8BBE; color:white; font-weight:bold; border-radius:10px; padding:10px 20px;}
@@ -20,16 +20,15 @@ st.markdown("""
 .stTable {border-radius:10px; overflow:hidden;}
 </style>
 """, unsafe_allow_html=True)
-
 st.title("📦 Dashboard NCM & IPI")
 st.markdown("Criado pela **NextSolutions - By Nivaldo Freitas**")
 st.markdown("---")
 
-# -----------------------------
-# --- Banco simples de usuários ---
-# -----------------------------
 USERS_FILE = "users.json"
 
+# ==========================
+# --- Funções de usuário ---
+# ==========================
 def carregar_usuarios():
     if os.path.exists(USERS_FILE):
         with open(USERS_FILE, "r") as f:
@@ -40,119 +39,77 @@ def salvar_usuarios(usuarios):
     with open(USERS_FILE, "w") as f:
         json.dump(usuarios, f, indent=4)
 
-def hash_senha(senha):
-    return hashlib.sha256(senha.encode()).hexdigest()
-
-def autenticar_usuario(username, senha):
+def criar_usuario(username, senha, role="user", ativo_ate="2099-12-31"):
     usuarios = carregar_usuarios()
     if username in usuarios:
-        u = usuarios[username]
-        if u["senha"] == hash_senha(senha):
-            return u
-    return None
-
-def criar_usuario(username, senha, role="user", ativo_ate=date.today().isoformat()):
-    usuarios = carregar_usuarios()
-    if username in usuarios:
-        return False
-    usuarios[username] = {"senha": hash_senha(senha), "role": role, "ativo_ate": ativo_ate, "key_groqk": ""}
+        return False, "Usuário já existe"
+    usuarios[username] = {"senha": senha, "role": role, "ativo_ate": ativo_ate}
     salvar_usuarios(usuarios)
-    return True
+    return True, "Usuário criado com sucesso"
 
-def atualizar_usuario(username, campo, valor):
+def validar_login(username, senha):
     usuarios = carregar_usuarios()
-    if username in usuarios:
-        usuarios[username][campo] = valor
-        salvar_usuarios(usuarios)
+    if username in usuarios and usuarios[username]["senha"] == senha:
+        ativo = usuarios[username]["ativo_ate"]
+        if datetime.strptime(ativo, "%Y-%m-%d") >= datetime.now():
+            return True, usuarios[username]["role"]
+        else:
+            return False, "Usuário expirado"
+    return False, "Usuário ou senha inválidos"
 
-def deletar_usuario(username):
-    usuarios = carregar_usuarios()
-    if username in usuarios:
-        usuarios.pop(username)
-        salvar_usuarios(usuarios)
-
-# -----------------------------
-# --- Login do usuário ---
-# -----------------------------
-with st.sidebar:
-    st.subheader("Login")
-    if "usuario_logado" not in st.session_state:
-        usuario = st.text_input("Usuário")
-        senha = st.text_input("Senha", type="password")
-        if st.button("Entrar"):
-            user = autenticar_usuario(usuario, senha)
-            if user:
-                st.session_state["usuario_logado"] = usuario
-                st.session_state["role"] = user["role"]
-                st.session_state["ativo_ate"] = user["ativo_ate"]
-                st.success(f"Bem-vindo {usuario}!")
-                st.experimental_rerun()
+# ==========================
+# --- Tela criação admin ---
+# ==========================
+usuarios = carregar_usuarios()
+if "admin" not in usuarios:
+    st.warning("Nenhum admin encontrado. Crie o primeiro usuário admin.")
+    username = st.text_input("Nome do usuário admin:", value="admin")
+    senha = st.text_input("Senha do admin:", type="password")
+    if st.button("Criar Admin"):
+        if username and senha:
+            sucesso, msg = criar_usuario(username, senha, role="admin")
+            if sucesso:
+                st.success(f"Admin '{username}' criado com sucesso! Faça login abaixo.")
             else:
-                st.error("Usuário ou senha inválidos")
-        st.stop()
+                st.error(msg)
+        else:
+            st.error("Digite usuário e senha válidos.")
+    st.stop()  # Para impedir que o restante do app carregue antes do admin
+else:
+    st.info("Admin já existe. Faça login para acessar o sistema.")
+
+# ==========================
+# --- Tela login ---
+# ==========================
+st.subheader("Login")
+login_user = st.text_input("Usuário")
+login_pass = st.text_input("Senha", type="password")
+if st.button("Entrar"):
+    valido, info = validar_login(login_user, login_pass)
+    if valido:
+        st.success(f"Login realizado! Role: {info}")
+        st.session_state['usuario'] = login_user
+        st.session_state['role'] = info
     else:
-        st.info(f"Logado como: {st.session_state['usuario_logado']} ({st.session_state['role']})")
-        if st.button("Sair"):
-            for key in ["usuario_logado","role","ativo_ate","GROQK_KEY"]: 
-                if key in st.session_state: st.session_state.pop(key)
-            st.experimental_rerun()
+        st.error(info)
+        st.stop()
 
-# -----------------------------
-# --- Controle de acesso por data ---
-# -----------------------------
-if datetime.now().date() > datetime.fromisoformat(st.session_state["ativo_ate"]).date():
-    st.warning("Seu acesso expirou. Solicite renovação ao administrador.")
-    st.stop()
-
-# -----------------------------
-# --- Inserção da API Key Groqk ---
-# -----------------------------
-with st.sidebar:
-    st.subheader("Configuração IA Groqk")
-    key_input = st.text_input("Insira sua API Key:", type="password")
-    if key_input:
-        st.session_state["GROQK_KEY"] = key_input
-        atualizar_usuario(st.session_state["usuario_logado"], "key_groqk", key_input)
-        st.success("API Key salva para a sessão!")
-
-# -----------------------------
-# --- Painel Admin ---
-# -----------------------------
-if st.session_state.get("role") == "admin":
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Painel Admin")
-    with st.sidebar.expander("Gerenciar usuários"):
-        novo_usuario = st.text_input("Novo usuário")
-        nova_senha = st.text_input("Senha", type="password")
-        role_usuario = st.selectbox("Tipo de usuário", ["user","admin"])
-        data_exp = st.date_input("Válido até", date.today())
-        if st.button("Criar usuário"):
-            if criar_usuario(novo_usuario, nova_senha, role_usuario, data_exp.isoformat()):
-                st.success("Usuário criado!")
-            else:
-                st.error("Usuário já existe.")
-        st.markdown("**Excluir usuário:**")
-        usuarios = list(carregar_usuarios().keys())
-        usuario_del = st.selectbox("Selecione usuário", usuarios)
-        if st.button("Deletar usuário"):
-            deletar_usuario(usuario_del)
-            st.success("Usuário deletado!")
-
-# -----------------------------
+# ==========================
 # --- Funções utilitárias ---
-# -----------------------------
+# ==========================
 def padronizar_codigo(codigo):
     codigo = str(codigo).replace(".", "").strip()
-    return codigo[:8].zfill(8)
+    codigo = codigo[:8].zfill(8)
+    return codigo
 
 def normalizar(texto):
     texto = unidecode.unidecode(str(texto).lower())
     texto = re.sub(r"[^a-z0-9\s]", " ", texto)
     return re.sub(r"\s+", " ", texto)
 
-# -----------------------------
-# --- Carregamento de dados ---
-# -----------------------------
+# ==========================
+# --- Carregar dados ---
+# ==========================
 def carregar_tipi(caminho="tipi.xlsx"):
     if os.path.exists(caminho):
         df = pd.read_excel(caminho, dtype=str)
@@ -182,59 +139,62 @@ def carregar_ncm(caminho="ncm_todos.csv"):
         df["codigo"] = df["codigo"].apply(padronizar_codigo)
         df["descricao"] = df["descricao"].astype(str)
         return df
-    return pd.DataFrame(columns=["codigo","descricao"])
+    return pd.DataFrame(columns=["codigo", "descricao"])
 
 df_tipi = carregar_tipi()
 df_ipi = carregar_ipi_itens()
 df_ncm = carregar_ncm()
 
-# -----------------------------
+# ==========================
 # --- Funções principais ---
-# -----------------------------
+# ==========================
 def buscar_sku_xml(sku=None, titulo=None, caminho_xml="GoogleShopping_full.xml"):
     if not os.path.exists(caminho_xml):
-        return [], "Arquivo XML não encontrado."
+        return None, "Arquivo XML não encontrado."
+    resultados = []
     try:
         tree = ET.parse(caminho_xml)
         root = tree.getroot()
-        resultados = []
         for item in root.iter():
-            if item.tag.split("}")[-1] != "item": continue
-            g_id, t, link, preco_prazo, preco_vista, desc, ncm = None, "", "", "", "", "", ""
+            if item.tag.split("}")[-1] != "item":
+                continue
+            g_id, t, link, preco_prazo, preco_vista, descricao, ncm = None, "", "", "", "", "", ""
             for child in item:
                 tag = child.tag.split("}")[-1]
                 text = child.text.strip() if child.text else ""
-                if tag == "id": g_id = text
-                elif tag == "title": t = text
-                elif tag == "link": link = text
-                elif tag == "price": preco_prazo = text
-                elif tag == "sale_price": preco_vista = text
-                elif tag == "description": desc = text
-                elif tag.lower() == "g:ncm" or tag.lower() == "ncm": ncm = text
-            if sku and g_id == str(sku):
-                resultados.append({"SKU": sku,"Título": t,"Link": link,"Valor à Prazo": float(preco_prazo or 0),
-                                   "Valor à Vista": float(preco_vista or preco_prazo or 0),"Descrição": desc,"NCM": ncm})
-            elif titulo:
-                score = fuzz.WRatio(normalizar(t), normalizar(titulo))
-                if score > 60:
-                    resultados.append({"SKU": g_id,"Título": t,"Link": link,"Valor à Prazo": float(preco_prazo or 0),
-                                       "Valor à Vista": float(preco_vista or preco_prazo or 0),"Descrição": desc,"NCM": ncm,"similaridade": score})
-        resultados.sort(key=lambda x: x.get("similaridade",100), reverse=True)
-        return resultados[:10], None
+                if tag=="id": g_id = text
+                elif tag=="title": t = text
+                elif tag=="link": link = text
+                elif tag=="price": preco_prazo=text
+                elif tag=="sale_price": preco_vista=text
+                elif tag=="description": descricao=text
+                elif tag.lower()=="g:ncm" or tag.lower()=="ncm": ncm=text
+            if sku and g_id==str(sku):
+                return [{"SKU":sku, "Título":t, "Link":link, "Valor à Prazo":float(preco_prazo or 0.0),
+                         "Valor à Vista":float(preco_vista or preco_prazo or 0.0), "Descrição":descricao, "NCM":ncm}], None
+            if titulo:
+                resultados.append({"SKU":g_id, "Título":t, "Link":link, "Valor à Prazo":float(preco_prazo or 0.0),
+                                   "Valor à Vista":float(preco_vista or preco_prazo or 0.0), "Descrição":descricao, "NCM":ncm})
+        if titulo:
+            termo_norm = normalizar(titulo)
+            descricoes_norm = [normalizar(r["Título"]) for r in resultados]
+            escolhas = process.extract(termo_norm, descricoes_norm, scorer=fuzz.WRatio, limit=10)
+            return [resultados[idx] for _,_,idx in escolhas], None
+        return None, "SKU não encontrado no XML."
     except ET.ParseError:
-        return [], "Erro ao ler o XML."
+        return None, "Erro ao ler o XML."
 
 def calcular_preco_final(sku, valor_final_desejado, frete=0):
     item = df_ipi[df_ipi['SKU']==str(sku)]
     if item.empty: return None, "SKU não encontrado na planilha IPI Itens."
     descricao = item['Descrição Item'].values[0]
     ipi_percentual = item['IPI %'].values[0]/100
-    base_calculo = valor_final_desejado / (1 + ipi_percentual)
+    base_calculo = valor_final_desejado / (1+ipi_percentual)
     valor_total = base_calculo + frete
-    ipi_valor = valor_total * ipi_percentual
-    valor_final = valor_total + ipi_valor
-    return descricao, {"valor_base": round(base_calculo,2),"frete": round(frete,2),
-                       "ipi": round(ipi_valor,2),"valor_final": round(valor_final,2)}, None
+    ipi_valor = valor_total*ipi_percentual
+    valor_final = valor_total+ipi_valor
+    return descricao, {"valor_base":round(base_calculo,2),"frete":round(frete,2),
+                       "ipi":round(ipi_valor,2),"valor_final":round(valor_final,2)}, None
 
 def buscar_por_codigo(df, codigo):
     codigo = padronizar_codigo(codigo)
@@ -242,8 +202,8 @@ def buscar_por_codigo(df, codigo):
     if not resultado.empty:
         ipi_val = df_tipi[df_tipi["codigo"]==codigo]["IPI"].values
         ipi_val = ipi_val[0] if len(ipi_val)>0 else "NT"
-        return {"codigo": codigo,"descricao": resultado["descricao"].values[0],"IPI": ipi_val}
-    return {"erro": f"NCM {codigo} não encontrado"}
+        return {"codigo":codigo, "descricao":resultado["descricao"].values[0], "IPI":ipi_val}
+    return {"erro":f"NCM {codigo} não encontrado"}
 
 def buscar_por_descricao(df, termo, limite=10):
     termo_norm = normalizar(termo)
@@ -254,73 +214,35 @@ def buscar_por_descricao(df, termo, limite=10):
         codigo = df.loc[idx,"codigo"]
         ipi_val = df_tipi[df_tipi["codigo"]==codigo]["IPI"].values
         ipi_val = ipi_val[0] if len(ipi_val)>0 else "NT"
-        resultados.append({"codigo": codigo,"descricao": df.loc[idx,"descricao"],"IPI": ipi_val,"similaridade": round(score,2)})
+        resultados.append({"codigo":codigo, "descricao":df.loc[idx,"descricao"], "IPI":ipi_val, "similaridade":round(score,2)})
     return resultados
 
-# -----------------------------
-# --- Função IA Groqk ---
-# -----------------------------
-def analisar_produto_groqk(titulo, descricao, valor):
-    api_key = st.session_state.get("GROQK_KEY")
-    if not api_key: return {"ncm_sugerido": None, "ipi_sugerido": None}
-    try:
-        payload = {"titulo": titulo, "descricao": descricao, "valor": valor}
-        headers = {"Authorization": f"Bearer {api_key}","Content-Type":"application/json"}
-        response = requests.post("https://api.groqk.com/analisar_produto", json=payload, headers=headers, timeout=10)
-        if response.status_code==200:
-            data = response.json()
-            return {"ncm_sugerido": data.get("ncm"), "ipi_sugerido": data.get("ipi_percentual")}
-    except:
-        pass
-    return {"ncm_sugerido": None, "ipi_sugerido": None}
-
-# -----------------------------
-# --- Interface com abas ---
-# -----------------------------
+# ==========================
+# --- Interface Streamlit ---
+# ==========================
 tab1, tab2, tab3 = st.tabs(["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦"])
 
-# --- Aba 1: Consulta de SKU ---
 with tab1:
-    st.subheader("Pesquisa por SKU ou Título")
-    pesquisa_tipo = st.radio("Pesquisar por:", ["SKU","Título"])
-    if pesquisa_tipo=="SKU":
-        sku_input = st.text_input("Digite o SKU do produto", key="sku_input")
-        if st.button("Buscar SKU"):
-            resultados, erro = buscar_sku_xml(sku=sku_input)
-            if erro: st.error(erro)
-            elif resultados:
-                item_info = resultados[0]
-                st.markdown(f"""
-                <div style='background-color:#f0f2f6; padding:15px; border-radius:10px'>
-                <h4>{item_info['Título']}</h4>
-                <p>{item_info['Descrição']}</p>
-                <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
-                <p><b>Valor à Prazo:</b> R$ {item_info['Valor à Prazo']}</p>
-                <p><b>Valor à Vista:</b> R$ {item_info['Valor à Vista']}</p>
-                <p><b>NCM Atual:</b> {item_info['NCM']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-    else:
-        titulo_input = st.text_input("Digite parte do título")
-        if st.button("Buscar Título"):
-            resultados, erro = buscar_sku_xml(titulo=titulo_input)
-            if erro: st.error(erro)
-            elif resultados:
-                selecionado = st.selectbox("Selecione o produto:", [f"{r['Título']} (SKU: {r['SKU']})" for r in resultados])
-                idx = [f"{r['Título']} (SKU: {r['SKU']})" for r in resultados].index(selecionado)
-                item_info = resultados[idx]
-                st.markdown(f"""
-                <div style='background-color:#f0f2f6; padding:15px; border-radius:10px'>
-                <h4>{item_info['Título']}</h4>
-                <p>{item_info['Descrição']}</p>
-                <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
-                <p><b>Valor à Prazo:</b> R$ {item_info['Valor à Prazo']}</p>
-                <p><b>Valor à Vista:</b> R$ {item_info['Valor à Vista']}</p>
-                <p><b>NCM Atual:</b> {item_info['NCM']}</p>
-                </div>
-                """, unsafe_allow_html=True)
+    st.subheader("Consulta de SKU no XML")
+    titulo_input = st.text_input("Digite o título do produto:")
+    if titulo_input:
+        resultados, erro = buscar_sku_xml(titulo=titulo_input)
+        if erro: st.error(erro)
+        elif resultados:
+            selecionado = st.selectbox("Selecione o produto:", [f"{r['Título']} (SKU: {r['SKU']})" for r in resultados])
+            idx = [f"{r['Título']} (SKU: {r['SKU']})" for r in resultados].index(selecionado)
+            item_info = resultados[idx]
+            st.markdown(f"""
+            <div style='background-color:#f0f2f6; padding:15px; border-radius:10px'>
+            <h4>{item_info['Título']}</h4>
+            <p>{item_info['Descrição']}</p>
+            <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
+            <p><b>Valor à Prazo:</b> R$ {item_info['Valor à Prazo']}</p>
+            <p><b>Valor à Vista:</b> R$ {item_info['Valor à Vista']}</p>
+            <p><b>NCM Atual:</b> {item_info['NCM']}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-# --- Aba 2: Cálculo do IPI ---
 with tab2:
     st.subheader("Cálculo do IPI")
     sku_calc = st.text_input("Digite o SKU:", key="calc_sku")
@@ -329,51 +251,46 @@ with tab2:
         if erro: st.error(erro)
         elif resultados:
             item_info = resultados[0]
-            opcao_valor = st.radio("Escolha o valor do produto:", ["À Prazo","À Vista"])
+            opcao_valor = st.radio("Escolha o valor:", ["À Prazo","À Vista"])
             valor_produto = item_info["Valor à Prazo"] if opcao_valor=="À Prazo" else item_info["Valor à Vista"]
             valor_final_input = st.text_input("Valor final desejado (com IPI):", value=str(valor_produto))
-            frete_checkbox = st.checkbox("O item possui frete?")
+            frete_checkbox = st.checkbox("Possui frete?")
             frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
-            if st.button("Calcular IPI"):
+            if st.button("Calcular IPI", key="btn_calc"):
                 try:
                     valor_final = float(valor_final_input.replace(",","."))
                     descricao, resultado, erro_calc = calcular_preco_final(sku_calc, valor_final, frete_valor)
                     if erro_calc: st.error(erro_calc)
                     else:
-                        analise_ia = analisar_produto_groqk(item_info['Título'], descricao, valor_final)
                         st.markdown(f"""
                         <div style='background-color:#eaf2f8; padding:15px; border-radius:10px'>
                         <h4>Resultado do Cálculo</h4>
                         <p><b>SKU:</b> {sku_calc}</p>
                         <p><b>Valor Selecionado:</b> R$ {valor_produto}</p>
-                        <p><b>Valor Base (Sem IPI):</b> R$ {resultado['valor_base']}</p>
+                        <p><b>Valor Base:</b> R$ {resultado['valor_base']}</p>
                         <p><b>Frete:</b> R$ {resultado['frete']}</p>
                         <p><b>IPI:</b> R$ {resultado['ipi']}</p>
-                        <p><b>Valor Final (Com IPI e Frete):</b> R$ {resultado['valor_final']}</p>
+                        <p><b>Valor Final:</b> R$ {resultado['valor_final']}</p>
                         <p><b>Descrição:</b> {descricao}</p>
                         <p><b>NCM Atual:</b> {item_info['NCM']}</p>
-                        <p><b>NCM Sugerido (IA):</b> {analise_ia.get('ncm_sugerido','-')}</p>
-                        <p><b>IPI Sugerido (IA):</b> {analise_ia.get('ipi_sugerido','-')}</p>
-                        <p><b>Link:</b> <a href='{item_info['Link']}' target='_blank'>{item_info['Link']}</a></p>
                         </div>
                         """, unsafe_allow_html=True)
-                except ValueError: st.error("Valor inválido.")
+                except ValueError: st.error("Valores inválidos.")
 
-# --- Aba 3: Consulta NCM/IPI ---
 with tab3:
     st.subheader("Consulta NCM/IPI")
     opcao_busca = st.radio("Tipo de busca:", ["Por código","Por descrição"], horizontal=True)
     if opcao_busca=="Por código":
-        codigo_input = st.text_input("Digite o código NCM:", key="ncm_codigo")
+        codigo_input = st.text_input("Código NCM:", key="ncm_codigo")
         if codigo_input:
             resultado = buscar_por_codigo(df_ncm, codigo_input)
             if "erro" in resultado: st.warning(resultado["erro"])
             else: st.table(pd.DataFrame([resultado]))
     else:
-        termo_input = st.text_input("Digite parte da descrição:", key="ncm_desc")
+        termo_input = st.text_input("Descrição do produto:", key="ncm_desc")
         if termo_input:
             resultados = buscar_por_descricao(df_ncm, termo_input)
             if resultados:
-                df_result = pd.DataFrame(resultados).sort_values(by="similaridade", ascending=False)
+                df_result = pd.DataFrame(resultados).sort_values("similaridade", ascending=False)
                 st.table(df_result)
             else: st.warning("Nenhum resultado encontrado.")
