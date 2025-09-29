@@ -287,8 +287,17 @@ elif aba == "Cálculo do IPI 💰":
 
     if st.session_state.produto_calc:
         item_info = st.session_state.produto_calc
+
         opcao_valor = st.radio("Escolha o valor:", ["À Prazo", "À Vista"])
-        valor_produto = item_info.get("Valor à Prazo", 0.0) if opcao_valor=="À Prazo" else item_info.get("Valor à Vista",0.0)
+
+        # Buscar valor correto da planilha IPI Itens
+        item_planilha = df_ipi[df_ipi["SKU"] == str(item_info.get("SKU",""))]
+        if not item_planilha.empty:
+            valor_produto = item_planilha["Valor à Prazo"].values[0] if opcao_valor=="À Prazo" else item_planilha["Valor à Vista"].values[0]
+        else:
+            # fallback se não achar na planilha
+            valor_produto = item_info.get("Valor à Prazo",0.0) if opcao_valor=="À Prazo" else item_info.get("Valor à Vista",0.0)
+
         valor_final_input = st.text_input("Valor final desejado (com IPI):", value=str(valor_produto), key="valor_final")
         frete_checkbox = st.checkbox("O item possui frete?")
         frete_valor = st.number_input("Valor do frete:", min_value=0.0, value=0.0, step=0.1) if frete_checkbox else 0.0
@@ -311,8 +320,6 @@ elif aba == "Cálculo do IPI 💰":
                     <p><b>Link:</b> <a href='{item_info.get('Link','#')}' target='_blank'>Abrir</a></p>
                     </div>
                     """, unsafe_allow_html=True)
-            except ValueError:
-                st.error("Digite apenas números para valor final e frete.")
 
 # ==========================
 # Aba: Consulta NCM/IPI
@@ -341,22 +348,32 @@ elif aba == "Consulta NCM/IPI 📦":
 # ==========================
 elif aba == "Análise Inteligente de NCM 🤖":
     st.subheader("Análise de NCM com IA Groqk")
-    if "groq_api_key" not in st.session_state or st.session_state.groq_api_key is None:
-        api_input = st.text_input("API Key Groqk:", type="password")
-        if api_input: st.session_state.groq_api_key = api_input
-    else:
-        api_input = st.session_state.groq_api_key
+
+    # Input da API Key sempre visível
+    api_input = st.text_input(
+        "API Key Groqk:", 
+        type="password", 
+        value=st.session_state.groq_api_key if st.session_state.groq_api_key else ""
+    )
+    if api_input:
+        st.session_state.groq_api_key = api_input
 
     titulo_produto = st.text_input("Título do Produto:")
     modelo = st.selectbox("Selecione o modelo da IA:", ["llama-3.3-70b-versatile", "outra-opcao"])
+
     if st.button("Analisar NCM"):
-        if not api_input: st.error("Informe a API Key da Groqk.")
-        elif not titulo_produto: st.error("Digite o título do produto.")
+        if not st.session_state.groq_api_key:
+            st.error("Informe a API Key da Groqk.")
+        elif not titulo_produto:
+            st.error("Digite o título do produto.")
         else:
             mensagem = f"Você é especialista em classificação fiscal (NCM/HS). Analise o título: '{titulo_produto}'. Retorne até 3 códigos NCM possíveis (8 dígitos) e a descrição de cada."
             try:
                 url_chat = "https://api.groq.com/openai/v1/chat/completions"
-                headers = {"Authorization": f"Bearer {api_input}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {st.session_state.groq_api_key}",
+                    "Content-Type": "application/json"
+                }
                 payload = {"model": modelo, "messages":[{"role":"user","content":mensagem}]}
                 response = requests.post(url_chat, json=payload, headers=headers, timeout=30)
                 response.raise_for_status()
