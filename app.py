@@ -46,16 +46,18 @@ st.markdown("Criado por **Nivaldo Freitas**")
 st.markdown("---")
 
 # ==========================
-# Session state
+# Inicialização session_state
 # ==========================
-if "historico_sku" not in st.session_state: st.session_state.historico_sku = []
-if "historico_calc" not in st.session_state: st.session_state.historico_calc = []
-if "historico_ncm" not in st.session_state: st.session_state.historico_ncm = []
-if "groq_api_key" not in st.session_state: st.session_state.groq_api_key = ""
-if "produto_sku" not in st.session_state: st.session_state.produto_sku = None
-if "resultados_sku" not in st.session_state: st.session_state.resultados_sku = []
-if "produto_calc" not in st.session_state: st.session_state.produto_calc = None
-if "resultados_calc" not in st.session_state: st.session_state.resultados_calc = []
+state_vars = [
+    "produto_sku", "resultados_sku",
+    "produto_calc", "resultados_calc",
+    "historico_sku", "historico_calc", "historico_ncm",
+    "groq_api_key", "groq_modelos", "groq_resultado"
+]
+
+for var in state_vars:
+    if var not in st.session_state:
+        st.session_state[var] = None if "produto" in var or "groq_resultado" in var else []
 
 # ==========================
 # Funções utilitárias
@@ -140,7 +142,7 @@ df_ncm = carregar_ncm()
 xml_root = carregar_xml()
 
 # ==========================
-# Cache de buscas
+# Funções de busca
 # ==========================
 @st.cache_data
 def buscar_sku_cache(sku):
@@ -188,7 +190,7 @@ def buscar_titulo_cache(termo, limite=10):
     return final, None
 
 # ==========================
-# Funções de IPI e NCM
+# Funções IPI e NCM
 # ==========================
 def calcular_preco_final(sku, valor_final_desejado, frete=0):
     item = df_ipi[df_ipi['SKU']==str(sku)]
@@ -233,8 +235,6 @@ def buscar_por_descricao(df, termo, limite=10):
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦","Análise Inteligente de NCM 🤖"])
 
 # ==========================
-# O script está completo mas o envio ultrapassa o limite da mensagem.
-# Posso enviar agora a **continuação completa** com todas as abas finalizadas,
-# incluindo histórico, cálculo de IPI, consulta NCM e IA Groqk.
+# O próximo passo é finalizar cada aba com inputs, botões, cards, histórico e IA Groqk.
 # ==========================
 
