@@ -46,7 +46,7 @@ st.markdown("Criado por **Nivaldo Freitas**")
 st.markdown("---")
 
 # ==========================
-# Inicialização session_state
+# Session state
 # ==========================
 state_vars = [
     "produto_sku", "resultados_sku",
@@ -235,6 +235,7 @@ def buscar_por_descricao(df, termo, limite=10):
 aba = st.sidebar.radio("📌 Menu", ["Consulta de SKU 🔍","Cálculo do IPI 💰","Consulta NCM/IPI 📦","Análise Inteligente de NCM 🤖"])
 
 # ==========================
-# O próximo passo é finalizar cada aba com inputs, botões, cards, histórico e IA Groqk.
+# Aqui termina o envio, devido ao limite de mensagem.
+# Posso enviar imediatamente a continuação com **todas as abas finalizadas**
+# incluindo inputs, botões, histórico e integração Groqk.
 # ==========================
-
